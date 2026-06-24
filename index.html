@@ -303,6 +303,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
 /* Notice popup overlay */
 .notice-popup-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:3000;display:none;align-items:center;justify-content:center}
 .notice-popup-overlay.open{display:flex}
+
+/* ─── SUSPENSION ─── */
+.susp-popup-header{background:linear-gradient(135deg,#7f1d1d,#dc2626)!important}
+.susp-card{display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;margin-bottom:8px}
+.susp-reason{font-size:11px;color:#991b1b;margin-top:2px}
+.susp-table{width:100%;border-collapse:collapse}
+.susp-table th{background:var(--surface2);padding:9px 12px;font-size:11px;font-weight:700;color:var(--text-soft);text-align:left;border-bottom:1px solid var(--border)}
+.susp-table td{padding:10px 12px;font-size:12px;color:var(--text);border-bottom:1px solid #eef3f2;vertical-align:middle}
+.susp-tag{display:inline-flex;align-items:center;padding:3px 10px;border-radius:14px;font-size:11px;font-weight:700}
+.susp-tag.auto{background:#fee2e2;color:#991b1b}
+.susp-tag.manual{background:#fef3c7;color:#92400e}
 .notice-popup-box{background:#fff;border-radius:var(--radius);width:90%;max-width:580px;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.35);overflow:hidden}
 .notice-popup-header{background:linear-gradient(135deg,var(--primary-dark),var(--primary));color:#fff;padding:16px 20px;display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
 .notice-popup-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:8px}
@@ -393,6 +404,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
     <!-- Admin-only (hidden by default) -->
     <button class="tabnav-btn" onclick="showTab('admin')" id="tab-admin" style="display:none">👑 전체 관리 <span class="tab-count" id="adminCount">0</span></button>
     <button class="tabnav-btn" onclick="showTab('noticemgr')" id="tab-noticemgr" style="display:none">📣 공지 관리</button>
+    <button class="tabnav-btn" onclick="showTab('suspension')" id="tab-suspension" style="display:none">🚫 중단 관리</button>
     <button class="tabnav-btn" onclick="showTab('refmgr')" id="tab-refmgr" style="display:none">📋 의뢰항목 관리</button>
     <button class="tabnav-btn" onclick="showTab('accounts')" id="tab-accounts" style="display:none">🏢 요양원 관리</button>
     <button class="tabnav-btn" onclick="showTab('settings')" id="tab-settings" style="display:none">⚙️ 이메일 설정</button>
@@ -439,6 +451,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
           <option value="new">신규</option>
           <option value="done">처리완료</option>
         </select>
+      </div>
+
+      <!-- 가정간호 중단 환자 안내 배너 -->
+      <div id="suspensionBanner" style="display:none;background:#fef2f2;border:1.5px solid #fecaca;border-radius:var(--radius);padding:14px 18px;margin-bottom:16px">
+        <div style="font-size:13px;font-weight:700;color:#991b1b;margin-bottom:8px">🚫 가정간호 중단 환자 안내 — 의뢰지 작성 불가</div>
+        <div id="suspensionBannerList" style="display:flex;flex-wrap:wrap;gap:8px"></div>
+        <div style="font-size:11px;color:#991b1b;margin-top:8px">※ 본인부담금 수납 확인 시 자동으로 해제되어 의뢰지 작성이 다시 가능해집니다.</div>
       </div>
 
       <div class="cards-grid" id="cardGrid"></div>
@@ -652,6 +671,101 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       <div id="noticeMgrList"></div>
     </div>
 
+    <!-- ── SUSPENSION MANAGER TAB (admin only) ── -->
+    <div id="tabSuspension" style="display:none">
+      <div class="page-header">
+        <div class="page-title">가정간호 중단 관리<small>본인부담금 미수 환자 자동/수동 중단 처리</small></div>
+        <button class="btn-primary" onclick="openAddSuspension()">🚫 환자 수동 중단 등록</button>
+      </div>
+
+      <!-- 점검 실행 모드 선택 -->
+      <div style="background:#fff;border:1.5px solid var(--border);border-radius:var(--radius);margin-bottom:18px;overflow:hidden">
+        <div style="background:linear-gradient(135deg,#1e3a5f,#374151);color:#fff;padding:13px 20px;font-size:14px;font-weight:700">📅 미수 점검 실행 설정</div>
+        <div style="padding:18px 20px;display:flex;flex-direction:column;gap:16px">
+
+          <!-- 자동 모드 -->
+          <div style="display:flex;align-items:flex-start;gap:14px;padding:14px;background:#f0fdf4;border:1.5px solid #86efac;border-radius:var(--radius-sm)">
+            <div style="flex:1">
+              <div style="font-weight:700;font-size:14px;color:#14532d;margin-bottom:4px">⚡ 자동 모드 (현재 동작 방식)</div>
+              <div style="font-size:12px;color:#16a34a;line-height:1.8">
+                관리자가 로그인할 때마다 자동으로 직전 달 수납 현황을 점검하고, 미수 환자를 중단 처리합니다.<br>
+                <strong>매월 1회만 실행</strong>되며, 이미 처리된 달은 다시 실행되지 않습니다.
+              </div>
+              <div style="margin-top:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span style="font-size:12px;color:var(--text-soft)">마지막 점검:</span>
+                <span id="suspLastRun" style="font-size:12px;font-weight:700;color:#14532d">조회 중...</span>
+                <button class="btn-secondary" style="font-size:12px;padding:5px 12px" onclick="forceRunSuspensionCheck()">🔄 지금 즉시 실행</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 점검 대상 요양원 선택 -->
+          <div style="padding:14px;background:#fdf4ff;border:1.5px solid #e9d5ff;border-radius:var(--radius-sm)">
+            <div style="font-weight:700;font-size:14px;color:#6b21a8;margin-bottom:6px">🏥 점검 대상 요양원 선택</div>
+            <div style="font-size:12px;color:#7c3aed;line-height:1.8;margin-bottom:12px">
+              체크한 요양원만 미수 점검 대상이 됩니다. <strong>체크 해제된 요양원은 일괄 수납 등의 이유로 점검에서 제외</strong>됩니다.<br>
+              새 요양원 추가 시 기본값은 <strong>체크(포함)</strong>이며, 저장하지 않으면 반영되지 않습니다.
+            </div>
+            <div id="suspFacilityCheckboxes" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:8px;margin-bottom:12px"></div>
+            <button class="btn-primary" style="font-size:12px" onclick="saveSuspensionFacilities()">💾 대상 요양원 저장</button>
+          </div>
+
+          <!-- 수동 예약 모드 -->
+          <div style="padding:14px;background:#eff6ff;border:1.5px solid #bfdbfe;border-radius:var(--radius-sm)">
+            <div style="font-weight:700;font-size:14px;color:#1e40af;margin-bottom:6px">🗓 수동 예약 모드</div>
+            <div style="font-size:12px;color:#3b82f6;line-height:1.8;margin-bottom:12px">
+              점검을 원하는 날짜를 지정하면, 지정한 날짜 이후 관리자 로그인 시 자동으로 점검이 실행됩니다.<br>
+              예: 7월 5일로 설정 → 7월 5일 이후 첫 로그인 시 6월 미수 점검 실행
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <label style="font-size:11px;font-weight:700;color:var(--text-soft)">점검 대상 월</label>
+                <input type="month" id="scheduleTargetMonth"
+                  style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <label style="font-size:11px;font-weight:700;color:var(--text-soft)">실행 예약 날짜</label>
+                <input type="date" id="scheduleRunDate"
+                  style="padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-size:13px;font-family:'Noto Sans KR',sans-serif;outline:none">
+              </div>
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <label style="font-size:11px;font-weight:700;color:var(--text-soft)">&nbsp;</label>
+                <button class="btn-primary" onclick="saveScheduledCheck()">💾 예약 저장</button>
+              </div>
+            </div>
+            <div id="scheduleStatusBox" style="margin-top:12px;display:none"></div>
+          </div>
+
+          <!-- 예약 목록 -->
+          <div>
+            <div style="font-size:13px;font-weight:700;color:var(--primary-dark);margin-bottom:8px">📋 등록된 예약 목록</div>
+            <div id="scheduleList" style="font-size:13px;color:var(--text-muted)">조회 중...</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius-sm);padding:14px 18px;margin-bottom:18px;font-size:13px;color:#991b1b;line-height:1.8">
+        💡 <strong>자동 중단 규칙</strong> (2026-06월 수납 현황부터 적용)<br>
+        직전 달 1일~말일 사이에 <strong>처리완료된 의뢰 중 본인부담금이 한 건도 수납완료되지 않은 환자</strong>는 자동으로 <strong>가정간호 중단</strong> 처리됩니다.<br>
+        • 중단된 환자는 <strong>의뢰지 작성이 차단</strong>되고, 해당 요양원 로그인 시 <strong>중단 안내 팝업</strong>이 표시됩니다.<br>
+        • 관리자가 해당 환자의 본인부담금을 <strong>수납완료(1건이라도)</strong>로 처리하면 → 중단 명단에서 즉시 제외됩니다.<br>
+        • 결제와 무관하게 별도 사유로 중단이 필요하면 위 <strong>"환자 수동 중단 등록"</strong>으로 직접 추가할 수 있습니다.
+      </div>
+
+      <div style="font-size:14px;font-weight:700;color:var(--primary-dark);margin-bottom:10px">🚫 현재 중단(홀드) 환자 목록</div>
+
+      <!-- 홀드 해제 방법 안내 -->
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:var(--radius-sm);padding:12px 16px;margin-bottom:14px;font-size:13px;color:#1d4ed8;line-height:1.8">
+        💡 <strong>홀드 해제 방법 2가지</strong><br>
+        <strong>① 수납 확인 후 자동 해제</strong>: 해당 환자의 의뢰 상세 → <strong>💰 가정간호 본인부담금</strong> → <strong>🔵 수납완료 처리</strong> 클릭<br>
+        &nbsp;&nbsp;&nbsp;→ 수납완료 처리하는 즉시 홀드가 자동으로 풀리고 의뢰지 작성이 재개됩니다.<br>
+        <strong>② 수납 여부와 관계없이 즉시 해제</strong>: 아래 목록에서 <strong>✅ 홀드 해제</strong> 버튼 클릭<br>
+        &nbsp;&nbsp;&nbsp;→ 수납 미확인 상태에서도 즉시 해제됩니다 (관리자 판단하에 사용).
+      </div>
+
+      <div id="suspensionListBox"></div>
+    </div>
+
     <!-- ── COPAY TAB ── -->
     <div id="tabCopay" style="display:none">
       <div class="page-header">
@@ -827,6 +941,17 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
               • 로그인 시 새 공지가 있으면 <strong>자동 팝업</strong>으로 안내 (필요 시 "오늘 하루 다시 보지 않기" 체크)<br>
               • 제목 클릭 시 내용 펼침/접기, 첨부된 이미지·파일 확인 가능<br>
               • ⭐ 표시는 중요 공지, 🎯 표시는 우리 요양원 전용 공지
+            </div>
+          </div>
+
+          <div style="border-left:3px solid #dc2626;padding-left:16px">
+            <div style="font-weight:700;font-size:14px;color:#991b1b;margin-bottom:8px">⑧ 🚫 가정간호 중단 안내</div>
+            <div style="font-size:13px;color:var(--text-soft);line-height:1.9">
+              • 본인부담금이 한 달 동안 <strong>한 건도 수납완료되지 않은 환자</strong>는 다음 달 1일부터 <strong style="color:#991b1b">가정간호 중단</strong> 처리됩니다.<br>
+              • 중단된 환자는 <strong>의뢰지 작성이 불가</strong>합니다 (저장 시 안내 메시지 표시).<br>
+              • 로그인 시 중단 환자 목록이 <strong>팝업으로 자동 안내</strong>되며, 의뢰 목록 화면 상단에도 빨간 안내 배너로 항상 표시됩니다.<br>
+              • 본인부담금이 수납완료 처리되면 <strong>자동으로 해제</strong>되어 의뢰지 작성이 다시 가능해집니다. 별도 요청 없이 자동 처리됩니다.<br>
+              • 본 기능은 2026년 06월 수납 현황부터 적용되며, 그 다음 달(2026년 07월) 1일부터 시행됩니다.
             </div>
           </div>
 
@@ -1167,6 +1292,24 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
   </div>
 </div>
 
+<!-- 가정간호 중단 안내 팝업 -->
+<div class="notice-popup-overlay" id="suspensionPopupOverlay">
+  <div class="notice-popup-box">
+    <div class="notice-popup-header susp-popup-header">
+      <div class="notice-popup-title">🚫 가정간호 중단 안내</div>
+      <button class="notice-popup-close" onclick="closeSuspensionPopup()">✕</button>
+    </div>
+    <div class="notice-popup-body" id="suspensionPopupBody"></div>
+    <div class="notice-popup-footer">
+      <label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-soft);cursor:pointer">
+        <input type="checkbox" id="suspensionDontShowToday" style="accent-color:var(--primary)">
+        오늘 하루 다시 보지 않기
+      </label>
+      <button class="btn-primary" onclick="closeSuspensionPopup()">확인</button>
+    </div>
+  </div>
+</div>
+
 <!-- Modal -->
 <div class="modal-overlay" id="modalOverlay">
   <div class="modal-box">
@@ -1203,6 +1346,12 @@ const ADMIN_DOC  = 'admin';
 const REFLIST_DOC = 'refList';
 const BIZ_DOC = 'business';
 const NOTICES_COL = 'notices';
+const SUSPENDED_COL = 'suspended_patients';
+const SUSP_CHECK_DOC  = 'suspensionCheck';
+const SUSP_SCHED_COL  = 'suspensionSchedules';
+const SUSP_FAC_DOC    = 'suspensionFacilities'; // 점검 대상 요양원 설정
+// 본 기능은 6월 수납 현황을 기준으로 7월부터 시행됩니다.
+const SUSPENSION_FEATURE_START_MONTH = '2026-06';
 const READS_COL   = 'notice_reads';
 
 // ═══════════════════════════════════════════════
@@ -1259,6 +1408,10 @@ let unsubRefs     = null;
 let unsubAccts    = null;
 let unsubRefList  = null;
 let unsubNotices  = null;
+let unsubSuspended = null;
+let suspendedPatients = []; // 가정간호 중단 환자 목록 (실시간 동기화)
+let _noticesReadyForPopup = false;
+let _suspendedReadyForPopup = false;
 let lightboxRefId = null;
 let lightboxCurIdx = 0;
 
@@ -1288,6 +1441,8 @@ async function setAdminPw(pw) {
 }
 
 function setupListeners() {
+  _noticesReadyForPopup = false;
+  _suspendedReadyForPopup = false;
   // Real-time referrals sync (sorted by createdAt desc)
   unsubRefs = db.collection(REFS_COL)
     .orderBy('createdAt','desc')
@@ -1331,12 +1486,32 @@ function setupListeners() {
       updateNoticeBadge();
       if (document.getElementById('tabNotice')?.style.display !== 'none') renderNoticeList();
       if (document.getElementById('tabNoticemgr')?.style.display !== 'none') renderNoticeMgrList();
-      // 로그인 후 첫 데이터 로드 시 팝업 표시
       if (noticeFirstLoad) {
         noticeFirstLoad = false;
-        showNoticePopup();
+        _noticesReadyForPopup = true;
+        maybeTriggerLoginPopups();
       }
     }, err => console.error('Notices listener error:', err));
+
+  // Real-time 가정간호 중단 목록 sync
+  let suspFirstLoad = true;
+  unsubSuspended = db.collection(SUSPENDED_COL)
+    .onSnapshot(async snap => {
+      suspendedPatients = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      renderList();
+      if (currentUser?.isAdmin && document.getElementById('tabSuspension')?.style.display !== 'none') {
+        renderSuspensionMgr();
+      }
+      if (suspFirstLoad) {
+        suspFirstLoad = false;
+        if (currentUser?.isAdmin) {
+          await loadSuspensionFacilities(); // 점검 대상 요양원 먼저 로드
+          await runMonthlySuspensionCheck();
+        }
+        _suspendedReadyForPopup = true;
+        maybeTriggerLoginPopups();
+      }
+    }, err => console.error('Suspended listener error:', err));
   // Real-time business info sync (모든 사용자 — 영수증 표시용)
   unsubBiz = db.collection(CFG_COL).doc(BIZ_DOC)
     .onSnapshot(snap => {
@@ -1351,6 +1526,7 @@ function teardownListeners() {
   if (unsubAccts)    { unsubAccts();    unsubAccts    = null; }
   if (unsubRefList)  { unsubRefList();  unsubRefList  = null; }
   if (unsubNotices)  { unsubNotices();  unsubNotices  = null; }
+  if (unsubSuspended){ unsubSuspended();unsubSuspended= null; }
   if (unsubBiz)      { unsubBiz();      unsubBiz      = null; }
 }
 
@@ -1395,7 +1571,7 @@ async function doLogin() {
     document.getElementById('userBadge').textContent = acc.name;
     document.getElementById('userBadge').classList.remove('admin-badge');
 
-    const adminTabs = ['tab-admin','tab-noticemgr','tab-refmgr','tab-accounts','tab-settings'];
+    const adminTabs = ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'];
     if (acc.isAdmin) {
       document.getElementById('userBadge').classList.add('admin-badge');
       adminTabs.forEach(t => document.getElementById(t).style.display = 'flex');
@@ -1430,7 +1606,7 @@ function doLogout() {
   referrals = []; accounts = [];
   // 세션 삭제
   sessionStorage.removeItem('hnr_session');
-  ['tab-admin','tab-noticemgr','tab-refmgr','tab-accounts','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
+  ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
   document.getElementById('filterFacility').style.display = '';
   document.getElementById('loginScreen').style.display = 'flex';
   document.getElementById('app').style.display = 'none';
@@ -1523,6 +1699,27 @@ async function saveReferral() {
   if (!room)     { showToast('⚠️ 층/호실을 입력해 주세요.'); return; }
   if (!symptoms) { showToast('⚠️ 현재증상을 입력해 주세요.'); return; }
 
+  // ── 가정간호 중단 환자 체크 (신규 작성 시에만) ──
+  if (!editingId) {
+    const birth = document.getElementById('f-birth').value.trim();
+    const susp = isPatientSuspended(facility, patient, birth);
+    if (susp) {
+      if (!currentUser.isAdmin) {
+        showToast(`🚫 '${patient}' 환자는 현재 가정간호 중단 상태입니다. 의뢰 작성이 제한됩니다. 관리자에게 문의해 주세요.`);
+        return;
+      }
+      // 관리자는 확인 후 강제 진행 가능
+      const reasonText = susp.reason==='auto' ? `${susp.basedOnMonth} 본인부담금 미수` : (susp.note ? `관리자 지정 — ${susp.note}` : '관리자 지정 중단');
+      const proceed = await new Promise(resolve=>{
+        showModal('🚫 가정간호 중단 환자', `'${patient}' 환자는 현재 가정간호 중단 상태입니다.<br><span style="color:#991b1b;font-size:12px">사유: ${reasonText}</span><br><br>그래도 의뢰를 작성하시겠습니까?`, [
+          { label:'취소', cls:'btn-secondary', action:()=>{ closeModal(); resolve(false); } },
+          { label:'작성 진행', cls:'btn-danger', action:()=>{ closeModal(); resolve(true); } }
+        ]);
+      });
+      if (!proceed) return;
+    }
+  }
+
   const diags = Array.from(document.querySelectorAll('input[name="diag"]:checked')).map(c=>c.value);
   const dOther = document.getElementById('f-diagOther').value.trim();
   if (dOther) diags.push('기타: '+dOther);
@@ -1611,6 +1808,7 @@ function getAdminReferrals() {
 // ═══════════════════════════════════════════════
 function renderList() {
   if (!currentUser) return;
+  renderSuspensionBanner();
   const list=getVisibleReferrals(), grid=document.getElementById('cardGrid'), empty=document.getElementById('emptyState');
   grid.innerHTML='';
   if (!list.length) { empty.style.display=''; document.getElementById('copaySum').style.display='none'; return; }
@@ -1768,10 +1966,26 @@ function showDetail(id) {
             return `<div style="font-size:13px;color:var(--text-muted)">처리완료 시 본인부담금이 표시됩니다.</div>`;
           }
           if (!r.copaySet) {
-            // 관리자가 아직 입력하지 않음 — 요양원에는 아무것도 표시 안 함
-            return currentUser.isAdmin
-              ? `<div style="font-size:13px;color:var(--text-muted)">아직 본인부담금이 입력되지 않았습니다. 위 입력란에서 금액을 입력해 주세요.</div>`
-              : `<div style="font-size:13px;color:var(--text-muted)">관리자가 아직 본인부담금을 입력하지 않았습니다.</div>`;
+            // 처리완료됐지만 본인부담금 미입력 상태
+            if (!currentUser.isAdmin) {
+              return `<div style="font-size:13px;color:var(--text-muted)">관리자가 아직 본인부담금을 입력하지 않았습니다.</div>`;
+            }
+            // 관리자: 바로 입력 가능
+            return `
+              <div style="font-size:13px;color:#92400e;background:#fffbeb;border:1px solid #fcd34d;border-radius:8px;padding:12px 16px;margin-bottom:12px">
+                ⚠️ 아직 본인부담금이 입력되지 않았습니다. 아래에서 바로 입력하여 저장하세요.
+              </div>
+              <div class="copay-section">
+                <div class="copay-label">💰 본인부담금 입력 후 저장</div>
+                <div class="copay-input-row">
+                  <input type="number" class="copay-input" id="copayLateInput-${r.id}"
+                    placeholder="0" min="0" step="100"
+                    onkeydown="if(event.key==='Enter')saveLateCopay('${r.id}')">
+                  <span class="copay-won">원</span>
+                  <button class="btn-primary" onclick="saveLateCopay('${r.id}')">💾 저장</button>
+                </div>
+                <div style="font-size:11px;color:#16a34a;margin-top:6px">※ 0원 입력도 가능합니다 (무료 처리)</div>
+              </div>`;
           }
           const isPaid = r.paymentStatus==='paid';
           const payBadge = isPaid
@@ -1871,6 +2085,25 @@ async function confirmComplete(id) {
     .catch(e=>showToast('⚠️ 동기화 지연: '+e.message));
 }
 
+// 이미 처리완료된 의뢰에 뒤늦게 본인부담금 입력
+function saveLateCopay(id) {
+  const inp = document.getElementById(`copayLateInput-${id}`);
+  const copay = inp ? Math.max(0, parseInt(inp.value)||0) : 0;
+  const update = {
+    copay,
+    copaySet: true,
+    paymentStatus: 'unpaid',
+    paymentDate: null,
+    copayDate: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+  applyLocalUpdate(id, update);
+  showDetail(id);
+  showToast(`✅ 본인부담금 ${copay.toLocaleString('ko-KR')}원 저장 완료 — 미수 상태로 등록됨`);
+  db.collection(REFS_COL).doc(id).update(update)
+    .catch(e => showToast('⚠️ 동기화 지연: ' + e.message));
+}
+
 // 처리완료 후 본인부담금 수정
 function openEditCopay(id, currentCopay) {
   document.getElementById('modalTitle').textContent = '본인부담금 수정';
@@ -1936,6 +2169,17 @@ function doPaymentComplete(id) {
   showToast(`✅ 수납완료 처리되었습니다. (수납일: ${date})`);
   db.collection(REFS_COL).doc(id).update(update)
     .catch(e=>showToast('⚠️ 동기화 지연: '+e.message));
+
+  // 수납완료 1건이라도 발생 시 → 가정간호 중단 명단에서 자동 제외
+  const r = referrals.find(x=>x.id===id);
+  if (r) {
+    const key = suspensionKey(r.facility, r.patient, r.birth||'');
+    if (suspendedPatients.find(s=>s.id===key)) {
+      db.collection(SUSPENDED_COL).doc(key).delete()
+        .then(()=>showToast(`✅ '${r.patient}' 환자가 가정간호 중단 명단에서 해제되었습니다. (의뢰 작성 재개)`))
+        .catch(()=>{});
+    }
+  }
 }
 function openEditPaymentDate(id, currentDate) {
   document.getElementById('modalTitle').textContent = '수납일 수정';
@@ -2713,6 +2957,501 @@ function closeNoticePopup() {
 }
 document.getElementById('noticePopupOverlay').onclick=function(e){ if(e.target===this) closeNoticePopup(); };
 
+// ═══════════════════════════════════════════════
+//  로그인 시 팝업 순서 제어 (중단 안내 → 공지사항)
+// ═══════════════════════════════════════════════
+function maybeTriggerLoginPopups() {
+  if (!_noticesReadyForPopup || !_suspendedReadyForPopup) return; // 둘 다 로드된 후 1회만
+  const suspShown = showSuspensionPopup();
+  if (!suspShown) showNoticePopup();
+  // 중단 팝업이 표시된 경우, 닫힐 때 공지 팝업을 이어서 표시 (closeSuspensionPopup에서 처리)
+}
+
+// ═══════════════════════════════════════════════
+//  가정간호 중단 — 헬퍼
+// ═══════════════════════════════════════════════
+function suspensionKey(facility, patient, birth) {
+  const raw = `${facility}__${patient}__${birth||'none'}`;
+  return raw.replace(/[\/\s#\?\[\]]+/g,'_').slice(0,300);
+}
+function isPatientSuspended(facility, patient, birth) {
+  const key = suspensionKey(facility, patient, birth);
+  return suspendedPatients.find(s => s.id === key) || null;
+}
+function getPrevMonthStr(refDate) {
+  const today = refDate || new Date();
+  const d = new Date(today.getFullYear(), today.getMonth()-1, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function getMonthRange(yyyymm) {
+  const [y,m] = yyyymm.split('-').map(Number);
+  const first = `${yyyymm}-01`;
+  const lastDate = new Date(y, m, 0).getDate(); // m: 1-indexed → 해당 월의 마지막 날
+  const last = `${yyyymm}-${String(lastDate).padStart(2,'0')}`;
+  return [first, last];
+}
+
+// ═══════════════════════════════════════════════
+//  점검 대상 요양원 설정
+// ═══════════════════════════════════════════════
+let suspTargetFacilities = null; // null = 전체, Set = 선택된 요양원
+
+async function loadSuspensionFacilities() {
+  try {
+    const doc = await db.collection(CFG_COL).doc(SUSP_FAC_DOC).get();
+    if (doc.exists && doc.data().facilities) {
+      suspTargetFacilities = new Set(doc.data().facilities);
+    } else {
+      suspTargetFacilities = null; // 전체
+    }
+  } catch(e) { suspTargetFacilities = null; }
+}
+
+async function renderSuspensionFacilityCheckboxes() {
+  await loadSuspensionFacilities();
+  const box = document.getElementById('suspFacilityCheckboxes'); if(!box) return;
+  const facilities = getAllFacilities();
+  if (!facilities.length) { box.innerHTML='<span style="color:var(--text-muted)">등록된 요양원이 없습니다.</span>'; return; }
+  box.innerHTML = facilities.map(f => {
+    const checked = suspTargetFacilities===null || suspTargetFacilities.has(f);
+    return `
+    <label style="display:flex;align-items:center;gap:8px;padding:8px 12px;background:#fff;border:1.5px solid ${checked?'#c084fc':'var(--border)'};border-radius:8px;cursor:pointer;font-size:13px;font-weight:${checked?'700':'400'};color:${checked?'#6b21a8':'var(--text-soft)'}">
+      <input type="checkbox" class="susp-fac-cb" value="${f}" ${checked?'checked':''} style="accent-color:#7c3aed" onchange="onSuspFacChange()">
+      ${f}
+    </label>`;
+  }).join('');
+}
+
+function onSuspFacChange() {
+  const all = document.querySelectorAll('.susp-fac-cb');
+  const checked = document.querySelectorAll('.susp-fac-cb:checked');
+  // 스타일 즉시 업데이트
+  all.forEach(cb=>{
+    const label = cb.closest('label');
+    if (cb.checked) {
+      label.style.borderColor='#c084fc'; label.style.fontWeight='700'; label.style.color='#6b21a8';
+    } else {
+      label.style.borderColor='var(--border)'; label.style.fontWeight='400'; label.style.color='var(--text-soft)';
+    }
+  });
+}
+
+async function saveSuspensionFacilities() {
+  const checked = Array.from(document.querySelectorAll('.susp-fac-cb:checked')).map(c=>c.value);
+  const all = getAllFacilities();
+  const isAll = checked.length === all.length;
+  try {
+    await db.collection(CFG_COL).doc(SUSP_FAC_DOC).set({
+      facilities: isAll ? null : checked,  // null = 전체
+      updatedAt: new Date().toISOString()
+    });
+    suspTargetFacilities = isAll ? null : new Set(checked);
+    const label = isAll ? '전체 요양원' : `${checked.join(', ')}`;
+    showToast(`✅ 점검 대상: ${label} (${checked.length}/${all.length}곳)`);
+  } catch(e) { showToast('❌ 오류: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════
+//  월간 자동 점검
+// ═══════════════════════════════════════════════
+async function runMonthlySuspensionCheck(forceTargetMonth) {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    let targetMonth = forceTargetMonth || null;
+
+    if (!targetMonth) {
+      // 1. 예약된 점검이 있는지 먼저 확인 (실행 날짜 도래 + 미처리 건)
+      const schedSnap = await db.collection(SUSP_SCHED_COL).get();
+      const schedules = schedSnap.docs.map(d=>({id:d.id,...d.data()}));
+      const pending = schedules.filter(s => s.runDate <= today && !s.executed);
+      if (pending.length) {
+        // 가장 이른 실행일 순으로 처리
+        pending.sort((a,b)=>a.runDate.localeCompare(b.runDate));
+        for (const sched of pending) {
+          await doSuspensionCheck(sched.targetMonth, true);
+          await db.collection(SUSP_SCHED_COL).doc(sched.id).update({
+            executed: true, executedAt: new Date().toISOString()
+          });
+        }
+        return;
+      }
+
+      // 2. 자동 모드: 직전 달 점검
+      targetMonth = getPrevMonthStr();
+      if (targetMonth < SUSPENSION_FEATURE_START_MONTH) return;
+    }
+
+    await doSuspensionCheck(targetMonth, !!forceTargetMonth);
+  } catch(e) {
+    console.error('월간 중단 점검 오류:', e);
+  }
+}
+
+// 실제 점검 실행 (targetMonth: 'YYYY-MM', force: 이미 처리된 달도 재실행 여부)
+async function doSuspensionCheck(targetMonth, force) {
+  const cfgDoc = await db.collection(CFG_COL).doc(SUSP_CHECK_DOC).get();
+  const processedMonth = cfgDoc.exists ? cfgDoc.data().processedMonth : null;
+  if (!force && processedMonth === targetMonth) return; // 이미 처리됨
+
+  const [firstDay, lastDay] = getMonthRange(targetMonth);
+
+  // 점검 대상 요양원 로드
+  await loadSuspensionFacilities();
+  const targetFacs = suspTargetFacilities; // null=전체, Set=지정
+
+  const monthRefs = referrals.filter(r =>
+    r.status==='done' && r.copaySet &&
+    r.visitDate>=firstDay && r.visitDate<=lastDay &&
+    (targetFacs===null || targetFacs.has(r.facility))  // ← 요양원 필터
+  );
+  const groups = {};
+  monthRefs.forEach(r=>{
+    const key = suspensionKey(r.facility, r.patient, r.birth||'');
+    if (!groups[key]) groups[key] = { facility:r.facility, patient:r.patient, birth:r.birth||'', hasPaid:false };
+    if (r.paymentStatus==='paid') groups[key].hasPaid = true;
+  });
+
+  const ops = [];
+  let suspCount = 0, releaseCount = 0;
+  Object.entries(groups).forEach(([key, g])=>{
+    const existing = suspendedPatients.find(s=>s.id===key);
+    if (!g.hasPaid) {
+      if (!existing) {
+        suspCount++;
+        ops.push(db.collection(SUSPENDED_COL).doc(key).set({
+          facility:g.facility, patient:g.patient, birth:g.birth,
+          reason:'auto', basedOnMonth: targetMonth,
+          createdAt: new Date().toISOString()
+        }));
+      } else if (existing.reason==='auto') {
+        ops.push(db.collection(SUSPENDED_COL).doc(key).update({ basedOnMonth: targetMonth }));
+      }
+    } else {
+      if (existing && existing.reason==='auto') {
+        releaseCount++;
+        ops.push(db.collection(SUSPENDED_COL).doc(key).delete());
+      }
+    }
+  });
+
+  await Promise.all(ops);
+  const now = new Date().toISOString();
+  await db.collection(CFG_COL).doc(SUSP_CHECK_DOC).set({
+    processedMonth: targetMonth,
+    lastRunAt: now,
+    lastResult: `중단 ${suspCount}명 추가, ${releaseCount}명 해제`
+  });
+
+  const facLabel = targetFacs ? `${targetFacs.size}개 요양원` : '전체 요양원';
+  const msg = `🚫 ${targetMonth} 수납 점검 완료 [${facLabel}] — 중단 ${suspCount}명, 해제 ${releaseCount}명`;
+  showToast(msg);
+  console.log(msg);
+
+  // 탭이 열려있으면 UI 갱신
+  if (document.getElementById('tabSuspension')?.style.display !== 'none') {
+    loadSuspensionScheduleUI();
+  }
+}
+
+// 즉시 강제 실행 (관리자 버튼)
+async function forceRunSuspensionCheck() {
+  const prevMonth = getPrevMonthStr();
+  if (prevMonth < SUSPENSION_FEATURE_START_MONTH) {
+    showToast(`⚠️ 시행 기준월(${SUSPENSION_FEATURE_START_MONTH}) 이전이라 아직 실행할 수 없습니다.`);
+    return;
+  }
+  showModal('즉시 점검 실행',
+    `<strong>${prevMonth}</strong> 수납 현황을 기준으로 미수 점검을 지금 즉시 실행합니다.<br>이미 처리된 경우에도 재실행됩니다. 계속하시겠습니까?`,
+    [
+      { label:'취소', cls:'btn-secondary', action:closeModal },
+      { label:'즉시 실행', cls:'btn-primary', action:async()=>{
+        closeModal();
+        showToast('🔄 점검 실행 중...');
+        await doSuspensionCheck(prevMonth, true);
+      }}
+    ]
+  );
+}
+
+// ═══════════════════════════════════════════════
+//  예약 점검 관리 UI
+// ═══════════════════════════════════════════════
+async function loadSuspensionScheduleUI() {
+  // 마지막 점검 정보
+  try {
+    const cfgDoc = await db.collection(CFG_COL).doc(SUSP_CHECK_DOC).get();
+    const lastRunEl = document.getElementById('suspLastRun');
+    if (lastRunEl) {
+      if (cfgDoc.exists && cfgDoc.data().lastRunAt) {
+        const d = cfgDoc.data();
+        lastRunEl.textContent = `${d.processedMonth} (${new Date(d.lastRunAt).toLocaleString('ko-KR')}) — ${d.lastResult||''}`;
+      } else {
+        lastRunEl.textContent = '아직 실행 기록 없음';
+      }
+    }
+
+    // 예약 목록 렌더
+    const schedSnap = await db.collection(SUSP_SCHED_COL).orderBy('runDate').get();
+    const schedules = schedSnap.docs.map(d=>({id:d.id,...d.data()}));
+    const listEl = document.getElementById('scheduleList');
+    if (!listEl) return;
+    if (!schedules.length) {
+      listEl.innerHTML = '<span style="color:var(--text-muted)">등록된 예약이 없습니다.</span>';
+      return;
+    }
+    const today = new Date().toISOString().split('T')[0];
+    listEl.innerHTML = `
+      <table style="width:100%;border-collapse:collapse;font-size:13px">
+        <thead><tr style="background:var(--surface2)">
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">점검 대상 월</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">실행 예약일</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)">상태</th>
+          <th style="padding:8px 12px;text-align:left;border-bottom:1px solid var(--border)"></th>
+        </tr></thead>
+        <tbody>
+          ${schedules.map(s=>`
+            <tr style="border-bottom:1px solid #eef3f2">
+              <td style="padding:9px 12px;font-weight:700;color:var(--primary-dark)">${s.targetMonth}</td>
+              <td style="padding:9px 12px">${s.runDate}</td>
+              <td style="padding:9px 12px">
+                ${s.executed
+                  ? `<span style="background:#d1fae5;color:#065f46;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700">✅ 실행완료 (${s.executedAt ? new Date(s.executedAt).toLocaleDateString('ko-KR') : ''})</span>`
+                  : s.runDate <= today
+                    ? `<span style="background:#fee2e2;color:#991b1b;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700">⏳ 실행 대기 (날짜 도래)</span>`
+                    : `<span style="background:#eff6ff;color:#1d4ed8;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:700">🗓 예약 대기 (D-${Math.ceil((new Date(s.runDate)-new Date())/86400000)}일)</span>`
+                }
+              </td>
+              <td style="padding:9px 12px">
+                ${!s.executed ? `<button class="btn-secondary btn-xs" onclick="deleteSchedule('${s.id}')">🗑 취소</button>` : ''}
+              </td>
+            </tr>`).join('')}
+        </tbody>
+      </table>`;
+  } catch(e) { console.error('Schedule UI load error:', e); }
+}
+
+async function saveScheduledCheck() {
+  const targetMonth = document.getElementById('scheduleTargetMonth').value;
+  const runDate     = document.getElementById('scheduleRunDate').value;
+  const statusBox   = document.getElementById('scheduleStatusBox');
+
+  if (!targetMonth) { showToast('⚠️ 점검 대상 월을 선택해 주세요.'); return; }
+  if (!runDate)      { showToast('⚠️ 실행 예약 날짜를 선택해 주세요.'); return; }
+  if (targetMonth < SUSPENSION_FEATURE_START_MONTH) {
+    showToast(`⚠️ ${targetMonth}은 시행 기준월(${SUSPENSION_FEATURE_START_MONTH}) 이전이라 등록할 수 없습니다.`); return;
+  }
+
+  try {
+    const docId = `${targetMonth}_${runDate}`;
+    await db.collection(SUSP_SCHED_COL).doc(docId).set({
+      targetMonth, runDate, executed: false,
+      createdAt: new Date().toISOString()
+    });
+    document.getElementById('scheduleTargetMonth').value = '';
+    document.getElementById('scheduleRunDate').value = '';
+    showToast(`✅ ${targetMonth} 점검이 ${runDate}에 실행되도록 예약되었습니다.`);
+    loadSuspensionScheduleUI();
+  } catch(e) { showToast('❌ 오류: '+e.message); }
+}
+
+async function deleteSchedule(id) {
+  try {
+    await db.collection(SUSP_SCHED_COL).doc(id).delete();
+    showToast('🗑 예약이 취소되었습니다.');
+    loadSuspensionScheduleUI();
+  } catch(e) { showToast('❌ 오류: '+e.message); }
+}
+
+// ═══════════════════════════════════════════════
+//  가정간호 중단 안내 팝업 (요양원 로그인 시)
+// ═══════════════════════════════════════════════
+function showSuspensionPopup() {
+  if (!currentUser || currentUser.isAdmin) return false;
+  const todayKey = `susp_skip_${currentUser.id}_${new Date().toDateString()}`;
+  if (localStorage.getItem(todayKey)) return false;
+
+  const mine = suspendedPatients.filter(s=>s.facility===currentUser.facility);
+  if (!mine.length) return false;
+
+  const body = document.getElementById('suspensionPopupBody');
+  body.innerHTML = `
+    <div style="padding:16px 20px">
+      <div style="font-size:13px;color:var(--text-soft);margin-bottom:12px;line-height:1.8">
+        아래 환자분들은 <strong style="color:#991b1b">본인부담금 미수</strong> 또는 관리자 지정으로 인해<br>
+        가정간호 의뢰 작성이 <strong style="color:#991b1b">중단</strong>된 상태입니다. 수납 확인 후 자동으로 재개됩니다.
+      </div>
+      ${mine.map(s=>`
+        <div class="susp-card">
+          <div>
+            <strong>${s.patient}</strong>${s.birth?` (${s.birth})`:''}
+            <div class="susp-reason">${s.reason==='auto' ? `${s.basedOnMonth} 본인부담금 미수` : (s.note ? `관리자 지정 — ${s.note}` : '관리자 지정 중단')}</div>
+          </div>
+          <span class="pay-badge unpaid">🚫 중단</span>
+        </div>`).join('')}
+    </div>`;
+
+  const cb = document.getElementById('suspensionDontShowToday');
+  if (cb) cb.checked = false;
+  document.getElementById('suspensionPopupOverlay').classList.add('open');
+  return true;
+}
+function closeSuspensionPopup() {
+  if (document.getElementById('suspensionDontShowToday')?.checked) {
+    const todayKey = `susp_skip_${currentUser.id}_${new Date().toDateString()}`;
+    localStorage.setItem(todayKey,'1');
+  }
+  document.getElementById('suspensionPopupOverlay').classList.remove('open');
+  // 이어서 공지사항 팝업 표시
+  showNoticePopup();
+}
+document.getElementById('suspensionPopupOverlay').onclick=function(e){ if(e.target===this) closeSuspensionPopup(); };
+
+// ═══════════════════════════════════════════════
+//  중단 관리 (관리자)
+// ═══════════════════════════════════════════════
+function renderSuspensionBanner() {
+  const banner = document.getElementById('suspensionBanner');
+  const listEl = document.getElementById('suspensionBannerList');
+  if (!banner || !listEl || currentUser.isAdmin) {
+    if (banner) banner.style.display = 'none';
+    return;
+  }
+  const mine = suspendedPatients.filter(s=>s.facility===currentUser.facility);
+  if (!mine.length) { banner.style.display = 'none'; return; }
+  banner.style.display = '';
+  listEl.innerHTML = mine.map(s=>`
+    <span class="pay-badge unpaid">🚫 ${s.patient}${s.birth?` (${s.birth})`:''}</span>
+  `).join('');
+}
+
+function renderSuspensionMgr() {
+  const box = document.getElementById('suspensionListBox'); if(!box) return;
+  if (!suspendedPatients.length) {
+    box.innerHTML = `<div class="empty-state"><div class="ei">✅</div><h3>현재 가정간호 중단 환자가 없습니다</h3></div>`;
+    return;
+  }
+  const sorted = [...suspendedPatients].sort((a,b)=>
+    a.facility.localeCompare(b.facility,'ko') || a.patient.localeCompare(b.patient,'ko')
+  );
+  box.innerHTML = `
+    <table class="susp-table">
+      <thead><tr>
+        <th style="width:120px">요양원</th>
+        <th>환자명</th>
+        <th style="width:120px">사유</th>
+        <th style="width:140px">기준월 / 등록일</th>
+        <th style="width:100px">관리</th>
+      </tr></thead>
+      <tbody>
+        ${sorted.map(s=>`
+          <tr>
+            <td>${s.facility}</td>
+            <td>${s.patient}${s.birth?` <span style="color:var(--text-muted);font-size:11px">(${s.birth})</span>`:''}</td>
+            <td>${s.reason==='auto'
+              ? `<span class="susp-tag auto">🔴 자동(미수)</span>`
+              : `<span class="susp-tag manual">🟡 수동${s.note?` · ${s.note}`:''}</span>`}</td>
+            <td>${s.reason==='auto' ? (s.basedOnMonth||'-') : new Date(s.createdAt).toLocaleDateString('ko-KR')}</td>
+            <td>
+              <button class="btn-primary"
+                style="font-size:12px;padding:5px 14px;background:#16a34a;border-color:#15803d;white-space:nowrap"
+                onclick="confirmRemoveSuspension('${s.id}','${s.patient}','${s.facility}')">
+                ✅ 홀드 해제
+              </button>
+            </td>
+          </tr>`).join('')}
+      </tbody>
+    </table>`;
+}
+
+function confirmRemoveSuspension(id, patient, facility) {
+  showModal('✅ 홀드 해제 확인',
+    `<div style="line-height:1.9">
+      <strong>${facility}</strong> · <strong>${patient}</strong> 환자의 가정간호 중단(홀드)을 해제합니다.<br>
+      <span style="color:#16a34a;font-size:13px">해제 즉시 의뢰지 작성이 다시 가능해집니다.</span><br><br>
+      <span style="font-size:12px;color:var(--text-muted)">※ 입금 미확인 상태에서 해제하는 경우, 별도로 수납완료 처리를 진행해 주세요.</span>
+    </div>`,
+    [
+      { label:'취소', cls:'btn-secondary', action:closeModal },
+      { label:'✅ 홀드 해제', cls:'btn-primary', action:()=>{ closeModal(); removeSuspension(id, patient); } }
+    ]
+  );
+}
+
+async function removeSuspension(id, patient) {
+  try {
+    await db.collection(SUSPENDED_COL).doc(id).delete();
+    showToast(`✅ '${patient||''}' 홀드가 해제되었습니다. 의뢰지 작성이 재개됩니다.`);
+  } catch(e) { showToast('❌ 오류: '+e.message); }
+}
+
+// 수동 중단 등록 모달
+function openAddSuspension() {
+  const facilities = getAllFacilities();
+  document.getElementById('modalTitle').textContent = '🚫 가정간호 중단 수동 등록';
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-form">
+      <div>
+        <label>요양원</label>
+        <select id="sa-facility" onchange="populateSuspensionPatientSelect()">
+          <option value="">선택하세요</option>
+          ${facilities.map(f=>`<option value="${f}">${f}</option>`).join('')}
+        </select>
+      </div>
+      <div>
+        <label>환자 검색</label>
+        <input type="text" id="sa-search" placeholder="환자명 검색" oninput="populateSuspensionPatientSelect()">
+      </div>
+      <div>
+        <label>환자 선택</label>
+        <select id="sa-patient"><option value="">요양원을 먼저 선택하세요</option></select>
+      </div>
+      <div>
+        <label>중단 사유 (선택)</label>
+        <input type="text" id="sa-note" placeholder="예: 입원, 서비스 중단 요청 등">
+      </div>
+    </div>`;
+  showModal(null,null,[
+    { label:'취소', cls:'btn-secondary', action:closeModal },
+    { label:'중단 등록', cls:'btn-danger', action:doAddSuspension }
+  ]);
+}
+function populateSuspensionPatientSelect() {
+  const fac = document.getElementById('sa-facility')?.value;
+  const query = (document.getElementById('sa-search')?.value||'').trim();
+  const sel = document.getElementById('sa-patient'); if(!sel) return;
+  if (!fac) { sel.innerHTML = '<option value="">요양원을 먼저 선택하세요</option>'; return; }
+
+  let list = referrals.filter(r=>r.facility===fac);
+  const seen = new Set(); const patients=[];
+  list.forEach(r=>{
+    const key=r.patient+'|'+(r.birth||'');
+    if(!seen.has(key)){ seen.add(key); patients.push({patient:r.patient, birth:r.birth||''}); }
+  });
+  let filtered = patients;
+  if (query) filtered = filtered.filter(p=>p.patient.includes(query));
+  filtered.sort((a,b)=>a.patient.localeCompare(b.patient,'ko'));
+
+  if (!filtered.length) { sel.innerHTML = `<option value="">${query?'검색 결과 없음':'환자 없음'}</option>`; return; }
+  sel.innerHTML = filtered.map(p=>`<option value="${p.patient}|||${p.birth}">${p.patient}${p.birth?' ('+p.birth+')':''}</option>`).join('');
+}
+async function doAddSuspension() {
+  const facility = document.getElementById('sa-facility')?.value;
+  const sel = document.getElementById('sa-patient')?.value;
+  const note = document.getElementById('sa-note')?.value.trim() || '';
+  if (!facility || !sel) { showToast('⚠️ 요양원과 환자를 선택해 주세요.'); return; }
+  const [patient, birth] = sel.split('|||');
+  const key = suspensionKey(facility, patient, birth);
+  try {
+    await db.collection(SUSPENDED_COL).doc(key).set({
+      facility, patient, birth: birth||'',
+      reason:'manual', note,
+      createdAt: new Date().toISOString()
+    });
+    closeModal();
+    showToast(`🚫 '${patient}' 환자가 가정간호 중단 처리되었습니다.`);
+  } catch(e) { showToast('❌ 오류: '+e.message); }
+}
+
 function renderNoticeMgrList() {
   const box=document.getElementById('noticeMgrList'); if(!box) return;
   if (!notices.length) { box.innerHTML='<div style="color:var(--text-muted);padding:20px;text-align:center">등록된 공지가 없습니다.</div>'; return; }
@@ -3469,7 +4208,7 @@ async function resetRefListToDefault() {
 
 // ── Open refmgr tab ──
 function showTab(tab) {
-  ['list','form','detail','admin','noticemgr','notice','copay','refmgr','accounts','settings','guide'].forEach(t => {
+  ['list','form','detail','admin','noticemgr','notice','copay','suspension','refmgr','accounts','settings','guide'].forEach(t => {
     const el = document.getElementById('tab'+t.charAt(0).toUpperCase()+t.slice(1));
     if (el) el.style.display = 'none';
   });
@@ -3489,6 +4228,11 @@ function showTab(tab) {
   if (tab === 'notice') { markAllNoticesRead(); renderNoticeList(); }
   if (tab === 'noticemgr') { populateNoticeEditorFacilities(); renderNoticeMgrList(); }
   if (tab === 'copay') initCopayTab();
+  if (tab === 'suspension') {
+    renderSuspensionMgr();
+    loadSuspensionScheduleUI();
+    renderSuspensionFacilityCheckboxes();
+  }
   if (tab === 'settings') populateBusinessConfigForm();
 }
 function showModal(title,body,actions) {
@@ -3539,7 +4283,7 @@ async function restoreSession() {
     document.getElementById('userBadge').textContent = acc.name;
     document.getElementById('userBadge').classList.remove('admin-badge');
 
-    const adminTabs = ['tab-admin','tab-noticemgr','tab-refmgr','tab-accounts','tab-settings'];
+    const adminTabs = ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'];
     if (acc.isAdmin) {
       document.getElementById('userBadge').classList.add('admin-badge');
       adminTabs.forEach(t => document.getElementById(t).style.display = 'flex');
