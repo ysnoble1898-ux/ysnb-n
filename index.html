@@ -492,7 +492,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
             <div class="form-group"><label>작성 요양원 <span class="required">*</span></label><input type="text" id="f-facility" readonly></div>
             <div class="form-group"><label>방문 요청일 <span class="required">*</span></label><input type="date" id="f-visitDate"></div>
             <div class="form-group"><label>환자명 <span class="required">*</span></label><input type="text" id="f-patient" placeholder="환자 이름"></div>
-            <div class="form-group"><label>생년월일 <span class="required">*</span></label><input type="text" id="f-birth" placeholder="예: 19401231 (신규: 주민번호 전체)"><span class="form-hint">신규 환자의 경우 주민번호 전체 입력</span></div>
+            <div class="form-group"><label>생년월일 <span class="required">*</span></label><input type="text" id="f-birth" placeholder="6자리: 601231 / 8자리: 19601231 / 주민번호 13자리" maxlength="14" oninput="this.value=this.value.replace(/[^0-9\-]/g,'')"><span class="form-hint">6자리(YYMMDD) · 8자리(YYYYMMDD) · 주민번호 13자리 — 필수</span></div>
             <div class="form-group span2"><label>주소</label><input type="text" id="f-address" placeholder="신규 환자는 반드시 작성"><span class="form-hint">신규 환자는 최소 1번 작성해야 합니다</span></div>
             <div class="form-group"><label>층/호실 <span class="required">*</span></label><input type="text" id="f-room" placeholder="예: 3층 504호"></div>
             <div class="form-group"><label>보호자 연락처</label><input type="text" id="f-guardian" placeholder="신환: 최소 1번 필수"><span class="form-hint">신환일 경우 최초 한번 필수입니다</span></div>
@@ -1624,7 +1624,11 @@ function doLogout() {
 // ═══════════════════════════════════════════════
 function setQuick(range, scope) {
   const today = new Date();
-  const fmt = d => d.toISOString().split('T')[0];
+  // 로컬 날짜 포맷 (toISOString은 UTC 기준이라 한국에서 날짜 밀림)
+  const fmt = d => {
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), day=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${day}`;
+  };
   const fromId = scope==='admin' ? 'adminDateFrom' : 'dateFrom';
   const toId   = scope==='admin' ? 'adminDateTo'   : 'dateTo';
   const bar = document.getElementById(scope==='admin'?'tabAdmin':'tabList');
@@ -1697,6 +1701,29 @@ async function saveReferral() {
   if (!patient)  { showToast('⚠️ 환자명을 입력해 주세요.'); return; }
   if (!visitDate){ showToast('⚠️ 방문 요청일을 선택해 주세요.'); return; }
   if (!room)     { showToast('⚠️ 층/호실을 입력해 주세요.'); return; }
+
+  // 생년월일 검증 — 8자리(YYYYMMDD) 또는 주민번호 13자리 필수
+  const birthVal = document.getElementById('f-birth').value.trim();
+  if (!birthVal) {
+    showToast('⚠️ 생년월일을 입력해 주세요. (예: 19401231 또는 주민번호 13자리)');
+    document.getElementById('f-birth').focus();
+    document.getElementById('f-birth').style.borderColor = '#ef4444';
+    setTimeout(()=>{ document.getElementById('f-birth').style.borderColor = ''; }, 3000);
+    return;
+  }
+  // 숫자만 추출 (하이픈·점·공백 제거)
+  const birthDigits = birthVal.replace(/[-.\s]/g, '');
+  const isValid6  = /^\d{6}$/.test(birthDigits);   // YYMMDD (6자리)
+  const isValid8  = /^\d{8}$/.test(birthDigits);   // YYYYMMDD (8자리)
+  const isValid13 = /^\d{13}$/.test(birthDigits);  // 주민번호 13자리
+  if (!isValid6 && !isValid8 && !isValid13) {
+    showToast('⚠️ 생년월일은 6자리(601211), 8자리(19601211) 또는 주민번호 13자리로 입력해 주세요.');
+    document.getElementById('f-birth').focus();
+    document.getElementById('f-birth').style.borderColor = '#ef4444';
+    setTimeout(()=>{ document.getElementById('f-birth').style.borderColor = ''; }, 3000);
+    return;
+  }
+
   if (!symptoms) { showToast('⚠️ 현재증상을 입력해 주세요.'); return; }
 
   // ── 가정간호 중단 환자 체크 (신규 작성 시에만) ──
@@ -3705,22 +3732,37 @@ function populateCopayPatientSelect() {
 
 // 기간 빠른 설정
 function setCopayQuick(range) {
-  const today = new Date();
-  const fmt = d => d.toISOString().split('T')[0];
+  // 로컬 날짜 전용 계산 — Date 객체의 UTC 오프셋 문제 완전 배제
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = now.getMonth(); // 0-indexed (0=1월, 5=6월)
+  const pad = n => String(n).padStart(2,'0');
+  // 특정 연월의 말일 반환
+  const lastDayOf = (yr, mo) => new Date(yr, mo+1, 0).getDate(); // mo: 0-indexed
+
   document.querySelectorAll('#tabCopay .qbtn').forEach(b=>b.classList.remove('active'));
+
+  let from='', to='';
   if (range==='all') {
-    document.getElementById('copayDateFrom').value=''; document.getElementById('copayDateTo').value='';
     document.getElementById('qall-copay')?.classList.add('active');
   } else if (range==='today') {
-    document.getElementById('copayDateFrom').value=fmt(today); document.getElementById('copayDateTo').value=fmt(today);
+    const d = `${y}-${pad(m+1)}-${pad(now.getDate())}`;
+    from = to = d;
   } else if (range==='week') {
-    const mon=new Date(today); mon.setDate(today.getDate()-today.getDay()+(today.getDay()===0?-6:1));
-    const sun=new Date(mon); sun.setDate(mon.getDate()+6);
-    document.getElementById('copayDateFrom').value=fmt(mon); document.getElementById('copayDateTo').value=fmt(sun);
+    const day = now.getDay(); // 0=일
+    const diff = day===0 ? -6 : 1-day; // 이번 주 월요일까지의 차이
+    const mon = new Date(y, m, now.getDate()+diff);
+    const sun = new Date(y, m, now.getDate()+diff+6);
+    from = `${mon.getFullYear()}-${pad(mon.getMonth()+1)}-${pad(mon.getDate())}`;
+    to   = `${sun.getFullYear()}-${pad(sun.getMonth()+1)}-${pad(sun.getDate())}`;
   } else if (range==='month') {
-    document.getElementById('copayDateFrom').value=fmt(new Date(today.getFullYear(),today.getMonth(),1));
-    document.getElementById('copayDateTo').value=fmt(new Date(today.getFullYear(),today.getMonth()+1,0));
+    // 이번 달 1일 ~ 말일 (달력 기준)
+    from = `${y}-${pad(m+1)}-01`;
+    to   = `${y}-${pad(m+1)}-${pad(lastDayOf(y, m))}`;
   }
+
+  document.getElementById('copayDateFrom').value = from;
+  document.getElementById('copayDateTo').value   = to;
   if (range!=='all' && event?.target?.classList) event.target.classList.add('active');
 }
 
