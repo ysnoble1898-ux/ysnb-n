@@ -428,9 +428,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         <div style="display:flex;flex-direction:column;gap:4px">
           <label style="font-size:11px;color:var(--primary);font-weight:700">📅 방문요청일 기준 조회</label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input type="date" id="dateFrom" onchange="renderList()">
+            <input type="date" id="dateFrom" onchange="onDateFilterChange('list')">
             <span class="date-sep">~</span>
-            <input type="date" id="dateTo" onchange="renderList()">
+            <input type="date" id="dateTo" onchange="onDateFilterChange('list')">
           </div>
         </div>
         <div class="quick-btns">
@@ -572,9 +572,9 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         <div style="display:flex;flex-direction:column;gap:4px">
           <label style="font-size:11px;color:var(--primary);font-weight:700">📅 방문요청일 기준 조회</label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input type="date" id="adminDateFrom" onchange="renderAdmin()">
+            <input type="date" id="adminDateFrom" onchange="onDateFilterChange('admin')">
             <span class="date-sep">~</span>
-            <input type="date" id="adminDateTo" onchange="renderAdmin()">
+            <input type="date" id="adminDateTo" onchange="onDateFilterChange('admin')">
           </div>
         </div>
         <div class="quick-btns">
@@ -1394,7 +1394,10 @@ const DEFAULT_ACCOUNTS = [
 //  STATE
 // ═══════════════════════════════════════════════
 let currentUser   = null;
-let referrals     = [];
+let referrals     = [];   // 최근 7일 실시간 데이터
+let extReferrals  = [];   // 날짜 필터로 추가 로드된 과거 데이터
+let loadedRanges  = [];   // 이미 로드된 날짜 범위 캐시 [{from, to}]
+let isLoadingMore = false;
 let accounts      = [];
 let notices       = [];   // kept in sync via onSnapshot
 let readNoticeIds = new Set(); // IDs this user has read
@@ -1444,9 +1447,17 @@ async function setAdminPw(pw) {
 function setupListeners() {
   _noticesReadyForPopup = false;
   _suspendedReadyForPopup = false;
-  // Real-time referrals sync (sorted by createdAt desc)
+  extReferrals = []; loadedRanges = [];
+
+  // 최근 7일만 실시간 구독 (초기 로드 속도 개선)
+  const today = new Date();
+  const weekAgo = new Date(today);
+  weekAgo.setDate(today.getDate() - 7);
+  const weekAgoStr = weekAgo.toISOString().split('T')[0];
+
   unsubRefs = db.collection(REFS_COL)
-    .orderBy('createdAt','desc')
+    .where('visitDate', '>=', weekAgoStr)
+    .orderBy('visitDate','desc')
     .onSnapshot(snap => {
       referrals = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderList();
@@ -1534,6 +1545,72 @@ function teardownListeners() {
 function loadAccounts() { return accounts; }
 function getAllFacilities() { return accounts.map(a => a.facility); }
 
+// ── 전체 의뢰 = 실시간(7일) + 추가 로드(과거) 합산, 중복 제거 ──
+function allReferrals() {
+  const map = {};
+  [...referrals, ...extReferrals].forEach(r => { map[r.id] = r; });
+  return Object.values(map).sort((a,b) => (b.visitDate||'').localeCompare(a.visitDate||''));
+}
+
+// 이미 로드된 범위인지 체크
+function isRangeLoaded(from, to) {
+  return loadedRanges.some(r => r.from <= from && r.to >= to);
+}
+
+// 날짜 범위가 최근 7일 이내인지 체크
+function isWithinRecentWeek(from) {
+  if (!from) return false;
+  const today = new Date();
+  const weekAgo = new Date(today);
+  weekAgo.setDate(today.getDate() - 7);
+  return from >= weekAgo.toISOString().split('T')[0];
+}
+
+// 과거 날짜 범위 추가 로드 (Firestore one-time get)
+async function loadRangeIfNeeded(from, to) {
+  if (!from) return; // 전체 조회 시 7일 데이터만 사용
+  if (isWithinRecentWeek(from)) return; // 이미 실시간 구독 범위
+  if (isRangeLoaded(from, to||'9999')) return; // 이미 로드됨
+
+  isLoadingMore = true;
+  showLoadingBanner(true);
+  try {
+    let query = db.collection(REFS_COL).where('visitDate', '>=', from);
+    if (to) query = query.where('visitDate', '<=', to);
+    const snap = await query.get();
+    const newDocs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    // 기존 extReferrals와 합산 (중복 제외)
+    const existingIds = new Set(extReferrals.map(r=>r.id));
+    newDocs.forEach(r => { if (!existingIds.has(r.id)) extReferrals.push(r); });
+    loadedRanges.push({ from, to: to||'9999' });
+    console.log(`✅ 추가 로드: ${from}~${to||'현재'} (${newDocs.length}건)`);
+  } catch(e) {
+    console.error('Range load error:', e);
+    showToast('⚠️ 데이터 조회 실패: ' + e.message);
+  } finally {
+    isLoadingMore = false;
+    showLoadingBanner(false);
+    renderList();
+    if (currentUser?.isAdmin) renderAdmin();
+  }
+}
+
+function showLoadingBanner(show) {
+  let banner = document.getElementById('loadingBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'loadingBanner';
+    banner.style.cssText = 'position:fixed;top:56px;left:0;right:0;background:var(--primary);color:#fff;text-align:center;padding:8px;font-size:13px;font-weight:600;z-index:999;display:none';
+    document.body.appendChild(banner);
+  }
+  if (show) {
+    banner.textContent = '🔄 과거 데이터를 불러오는 중...';
+    banner.style.display = 'block';
+  } else {
+    banner.style.display = 'none';
+  }
+}
+
 // ═══════════════════════════════════════════════
 //  AUTH
 // ═══════════════════════════════════════════════
@@ -1605,6 +1682,7 @@ function doLogout() {
   teardownListeners();
   currentUser = null;
   referrals = []; accounts = [];
+  extReferrals = []; loadedRanges = [];
   // 세션 삭제
   sessionStorage.removeItem('hnr_session');
   ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
@@ -1651,7 +1729,8 @@ function setQuick(range, scope) {
     document.getElementById(toId).value=fmt(new Date(today.getFullYear(),today.getMonth(),0));
   }
   if (range!=='all' && event?.target?.classList) event.target.classList.add('active');
-  scope==='admin' ? renderAdmin() : renderList();
+  // 과거 범위(지난달 등) 선택 시 데이터 추가 로드
+  onDateFilterChange(scope);
 }
 
 // ═══════════════════════════════════════════════
@@ -1843,7 +1922,7 @@ function applyDateFilter(list, fromId, toId) {
   return list;
 }
 function getVisibleReferrals() {
-  let list = currentUser.isAdmin ? referrals : referrals.filter(r=>r.facility===currentUser.facility);
+  let list = currentUser.isAdmin ? allReferrals() : allReferrals().filter(r=>r.facility===currentUser.facility);
   list = applyDateFilter(list,'dateFrom','dateTo');
   const q   = (document.getElementById('searchInput')?.value||'').toLowerCase();
   const fac = document.getElementById('filterFacility')?.value||'';
@@ -1854,7 +1933,7 @@ function getVisibleReferrals() {
   return list;
 }
 function getAdminReferrals() {
-  let list = applyDateFilter([...referrals],'adminDateFrom','adminDateTo');
+  let list = applyDateFilter([...allReferrals()],'adminDateFrom','adminDateTo');
   const q   = (document.getElementById('adminSearch')?.value||'').toLowerCase();
   const fac = document.getElementById('adminFacility')?.value||'';
   const st  = document.getElementById('adminStatus')?.value||'';
@@ -1867,6 +1946,22 @@ function getAdminReferrals() {
 // ═══════════════════════════════════════════════
 //  RENDER LIST
 // ═══════════════════════════════════════════════
+// 날짜 필터 변경 시 → 범위에 따라 과거 데이터 자동 로드
+async function onDateFilterChange(scope) {
+  const fromId = scope==='admin' ? 'adminDateFrom' : 'dateFrom';
+  const toId   = scope==='admin' ? 'adminDateTo'   : 'dateTo';
+  const from = document.getElementById(fromId)?.value || '';
+  const to   = document.getElementById(toId)?.value   || '';
+
+  if (scope==='admin') renderAdmin(); else renderList();
+
+  // 최근 7일 이전 범위가 포함되면 과거 데이터 추가 로드
+  if (from && !isWithinRecentWeek(from)) {
+    await loadRangeIfNeeded(from, to || new Date().toISOString().split('T')[0]);
+    if (scope==='admin') renderAdmin(); else renderList();
+  }
+}
+
 function renderList() {
   if (!currentUser) return;
   renderSuspensionBanner();
@@ -3240,12 +3335,15 @@ async function doSuspensionCheck(targetMonth, force) {
   await loadSuspensionFacilities();
   const targetFacs = suspTargetFacilities; // null=전체, Set=지정
 
-  // 해당 월 처리완료 의뢰 전체 조회
-  // (copaySet 여부 무관 — copaySet 없는 기존 의뢰도 점검 대상)
-  const monthRefs = referrals.filter(r =>
-    r.status==='done' &&
-    r.visitDate>=firstDay && r.visitDate<=lastDay &&
-    (targetFacs===null || targetFacs.has(r.facility))
+  // 해당 월 처리완료 의뢰 직접 Firestore 조회 (메모리에 없는 과거 데이터 포함)
+  const snap = await db.collection(REFS_COL)
+    .where('visitDate', '>=', firstDay)
+    .where('visitDate', '<=', lastDay)
+    .where('status', '==', 'done')
+    .get();
+  const allMonthRefs = snap.docs.map(d=>({id:d.id,...d.data()}));
+  const monthRefs = allMonthRefs.filter(r =>
+    targetFacs===null || targetFacs.has(r.facility)
   );
   const groups = {};
   monthRefs.forEach(r=>{
