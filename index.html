@@ -435,10 +435,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         </div>
         <div class="quick-btns">
           <button class="qbtn" onclick="setQuick('today','list')">오늘</button>
-          <button class="qbtn" onclick="setQuick('week','list')">이번 주</button>
+          <button class="qbtn active" onclick="setQuick('week','list')">이번 주</button>
           <button class="qbtn" onclick="setQuick('month','list')">이번 달</button>
           <button class="qbtn" onclick="setQuick('prevMonth','list')">지난 달</button>
-          <button class="qbtn active" id="qall-list" onclick="setQuick('all','list')">전체</button>
+          <button class="qbtn" id="qall-list" onclick="setQuick('all','list')">전체</button>
         </div>
       </div>
 
@@ -572,18 +572,19 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         <div style="display:flex;flex-direction:column;gap:4px">
           <label style="font-size:11px;color:var(--primary);font-weight:700">📅 방문요청일 기준 조회</label>
           <div style="display:flex;align-items:center;gap:6px">
-            <input type="date" id="adminDateFrom" onchange="onDateFilterChange('admin')">
+            <input type="date" id="adminDateFrom">
             <span class="date-sep">~</span>
-            <input type="date" id="adminDateTo" onchange="onDateFilterChange('admin')">
+            <input type="date" id="adminDateTo">
           </div>
         </div>
         <div class="quick-btns">
-          <button class="qbtn" onclick="setQuick('today','admin')">오늘</button>
-          <button class="qbtn" onclick="setQuick('week','admin')">이번 주</button>
-          <button class="qbtn" onclick="setQuick('month','admin')">이번 달</button>
-          <button class="qbtn" onclick="setQuick('prevMonth','admin')">지난 달</button>
-          <button class="qbtn active" id="qall-admin" onclick="setQuick('all','admin')">전체</button>
+          <button class="qbtn" onclick="setAdminQuick('today')">오늘</button>
+          <button class="qbtn active" onclick="setAdminQuick('week')">이번 주</button>
+          <button class="qbtn" onclick="setAdminQuick('month')">이번 달</button>
+          <button class="qbtn" onclick="setAdminQuick('prevMonth')">지난 달</button>
+          <button class="qbtn" id="qall-admin" onclick="setAdminQuick('all')">전체</button>
         </div>
+        <button class="btn-primary" onclick="doAdminSearch()" style="height:42px;white-space:nowrap;padding:0 20px">🔍 조회</button>
       </div>
 
       <div class="filter-bar">
@@ -598,7 +599,13 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         </select>
       </div>
 
-      <div class="admin-table-wrap">
+      <div id="adminEmptyGuide" style="text-align:center;padding:60px 20px;color:var(--text-muted)">
+        <div style="font-size:48px;margin-bottom:16px">🔍</div>
+        <div style="font-size:16px;font-weight:700;color:var(--text-soft);margin-bottom:8px">기간을 선택하고 조회 버튼을 눌러주세요</div>
+        <div style="font-size:13px">오늘 · 이번 주 · 이번 달 · 지난 달 · 직접 입력 후 🔍 조회</div>
+      </div>
+
+      <div class="admin-table-wrap" id="adminTableWrap" style="display:none">
         <table class="admin-table">
           <thead><tr><th>요양원</th><th>환자명</th><th>층/호실</th><th>방문 요청일</th><th>진단명</th><th>의뢰내용</th><th>상태</th><th>작업</th></tr></thead>
           <tbody id="adminTbody"></tbody>
@@ -1668,6 +1675,8 @@ async function doLogin() {
     initForm();
     showTab('list');
     document.getElementById('listSubtitle').textContent = acc.isAdmin ? '전체 의뢰 현황' : acc.facility + ' 의뢰 현황';
+    // 기본 필터: 이번 주
+    setTimeout(()=>setQuick('week','list'), 100);
 
   } catch(e) {
     console.error('Login error:', e);
@@ -1682,7 +1691,7 @@ function doLogout() {
   teardownListeners();
   currentUser = null;
   referrals = []; accounts = [];
-  extReferrals = []; loadedRanges = [];
+  extReferrals = []; loadedRanges = []; adminSearched = false;
   // 세션 삭제
   sessionStorage.removeItem('hnr_session');
   ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
@@ -1701,6 +1710,57 @@ function doLogout() {
 // ═══════════════════════════════════════════════
 //  DATE QUICK FILTERS
 // ═══════════════════════════════════════════════
+// 전체 관리 탭 전용 날짜 빠른 설정 (조회 버튼과 분리)
+let adminSearched = false; // 조회 버튼을 누른 상태인지
+
+function setAdminQuick(range) {
+  const today = new Date();
+  const y = today.getFullYear();
+  const m = today.getMonth();
+  const d = today.getDate();
+  const pad = n => String(n).padStart(2,'0');
+  const lastDay = (yr, mo) => new Date(yr, mo+1, 0).getDate();
+
+  document.querySelectorAll('#tabAdmin .qbtn').forEach(b=>b.classList.remove('active'));
+  if (event?.target?.classList) event.target.classList.add('active');
+
+  if (range==='all') {
+    document.getElementById('adminDateFrom').value='';
+    document.getElementById('adminDateTo').value='';
+    document.getElementById('qall-admin').classList.add('active');
+  } else if (range==='today') {
+    const s=`${y}-${pad(m+1)}-${pad(d)}`;
+    document.getElementById('adminDateFrom').value=s;
+    document.getElementById('adminDateTo').value=s;
+  } else if (range==='week') {
+    const dow=today.getDay(); const diff=dow===0?-6:1-dow;
+    const mon=new Date(y,m,d+diff), sun=new Date(y,m,d+diff+6);
+    document.getElementById('adminDateFrom').value=`${mon.getFullYear()}-${pad(mon.getMonth()+1)}-${pad(mon.getDate())}`;
+    document.getElementById('adminDateTo').value=`${sun.getFullYear()}-${pad(sun.getMonth()+1)}-${pad(sun.getDate())}`;
+  } else if (range==='month') {
+    document.getElementById('adminDateFrom').value=`${y}-${pad(m+1)}-01`;
+    document.getElementById('adminDateTo').value=`${y}-${pad(m+1)}-${pad(lastDay(y,m))}`;
+  } else if (range==='prevMonth') {
+    const pm=m===0?11:m-1, py=m===0?y-1:y;
+    document.getElementById('adminDateFrom').value=`${py}-${pad(pm+1)}-01`;
+    document.getElementById('adminDateTo').value=`${py}-${pad(pm+1)}-${pad(lastDay(py,pm))}`;
+  }
+}
+
+async function doAdminSearch() {
+  const from = document.getElementById('adminDateFrom').value;
+  const to   = document.getElementById('adminDateTo').value;
+  adminSearched = true;
+  document.getElementById('adminEmptyGuide').style.display='none';
+  document.getElementById('adminTableWrap').style.display='';
+
+  // 범위 로드 필요 시 fetch
+  if (from && !isWithinRecentWeek(from)) {
+    await loadRangeIfNeeded(from, to || new Date().toISOString().split('T')[0]);
+  }
+  renderAdmin();
+}
+
 function setQuick(range, scope) {
   const today = new Date();
   // 로컬 날짜 포맷 (toISOString은 UTC 기준이라 한국에서 날짜 밀림)
@@ -2373,6 +2433,7 @@ async function deleteReferral(id) {
 // ═══════════════════════════════════════════════
 function renderAdmin() {
   if (!currentUser?.isAdmin) return;
+  if (!adminSearched) return; // 조회 버튼을 누르기 전에는 실행 안 함
   const list=getAdminReferrals();
   document.getElementById('adminTbody').innerHTML=list.map(r=>`
     <tr>
@@ -4475,7 +4536,14 @@ function showTab(tab) {
   const btn = document.getElementById('tab-'+tab);
   if (btn) btn.classList.add('active');
   if (tab === 'form' && !editingId) resetForm();
-  if (tab === 'form') renderRefGrid(); // 탭 열 때마다 최신 의뢰항목 반영
+  if (tab === 'form') renderRefGrid();
+  if (tab === 'admin') {
+    // 전체 관리: 조회 버튼 누르기 전까지 빈 상태 유지
+    // adminSearched는 유지 (탭 이동해도 이전 조회 결과 유지)
+    document.getElementById('adminEmptyGuide').style.display = adminSearched ? 'none' : '';
+    document.getElementById('adminTableWrap').style.display  = adminSearched ? '' : 'none';
+    if (adminSearched) renderAdmin();
+  } // 탭 열 때마다 최신 의뢰항목 반영
   if (tab === 'refmgr' && currentUser?.isAdmin) {
     // 탭을 새로 열 때만 currentRefList로 초기화
     refMgrList = [...currentRefList];
@@ -4556,6 +4624,8 @@ async function restoreSession() {
     initForm();
     showTab('list');
     document.getElementById('listSubtitle').textContent = acc.isAdmin ? '전체 의뢰 현황' : acc.facility + ' 의뢰 현황';
+    // 기본 필터: 이번 주
+    setTimeout(()=>setQuick('week','list'), 100);
     // 팝업은 notices onSnapshot 첫 로드 시 자동으로 표시됨
 
   } catch(e) {
