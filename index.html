@@ -1605,7 +1605,7 @@ async function loadRangeIfNeeded(from, to) {
   }
 }
 
-function showLoadingBanner(show) {
+function showLoadingBanner(show, msg) {
   let banner = document.getElementById('loadingBanner');
   if (!banner) {
     banner = document.createElement('div');
@@ -1614,10 +1614,30 @@ function showLoadingBanner(show) {
     document.body.appendChild(banner);
   }
   if (show) {
-    banner.textContent = '🔄 과거 데이터를 불러오는 중...';
+    banner.textContent = msg || '🔄 데이터를 불러오는 중...';
     banner.style.display = 'block';
   } else {
     banner.style.display = 'none';
+  }
+}
+
+// 전체 데이터 로드 (전체 조회 시)
+let allLoaded = false;
+async function loadAllIfNeeded() {
+  if (allLoaded) return;
+  showLoadingBanner(true, '🔄 전체 데이터를 불러오는 중... (시간이 걸릴 수 있습니다)');
+  try {
+    const snap = await db.collection(REFS_COL).get();
+    const allDocs = snap.docs.map(d=>({id:d.id,...d.data()}));
+    const existingIds = new Set([...referrals,...extReferrals].map(r=>r.id));
+    allDocs.forEach(r=>{ if(!existingIds.has(r.id)) extReferrals.push(r); });
+    allLoaded = true;
+    console.log(`✅ 전체 로드 완료: ${allDocs.length}건`);
+  } catch(e) {
+    console.error('전체 로드 오류:', e);
+    showToast('❌ 전체 데이터 로드 실패: '+e.message);
+  } finally {
+    showLoadingBanner(false);
   }
 }
 
@@ -1694,7 +1714,7 @@ function doLogout() {
   teardownListeners();
   currentUser = null;
   referrals = []; accounts = [];
-  extReferrals = []; loadedRanges = []; adminSearched = false;
+  extReferrals = []; loadedRanges = []; adminSearched = false; allLoaded = false;
   // 세션 삭제
   sessionStorage.removeItem('hnr_session');
   ['tab-admin','tab-noticemgr','tab-suspension','tab-refmgr','tab-accounts','tab-settings'].forEach(t => document.getElementById(t).style.display = 'none');
@@ -1756,11 +1776,15 @@ async function doAdminSearch() {
   adminSearched = true;
   document.getElementById('adminEmptyGuide').style.display='none';
   document.getElementById('adminTableWrap').style.display='';
+  showLoadingBanner(true);
 
-  // 범위 로드 필요 시 fetch
-  if (from && !isWithinRecentWeek(from)) {
+  // "전체" 선택 시 모든 데이터 로드
+  if (!from && !to) {
+    await loadAllIfNeeded();
+  } else if (from && !isWithinRecentWeek(from)) {
     await loadRangeIfNeeded(from, to || new Date().toISOString().split('T')[0]);
   }
+  showLoadingBanner(false);
   renderAdmin();
 }
 
@@ -2435,28 +2459,49 @@ async function deleteReferral(id) {
 // ═══════════════════════════════════════════════
 //  ADMIN TABLE
 // ═══════════════════════════════════════════════
-// 현황판 카운터 — 항상 표시 (전체 7일 실시간 데이터 기준)
+// 현황판 카운터 — 조회된 기간의 데이터로 정확한 카운터 표시
 async function renderAdminStats() {
   if (!currentUser?.isAdmin) return;
   const facilities = getAllFacilities();
-  const week = referrals; // 실시간 7일 데이터
 
-  // 전체 누적 건수는 Firestore에서 직접 count (문서 내용 없이 ID만)
-  let totalCount = '...';
-  let totalNew = '...';
-  try {
-    const totalSnap = await db.collection(REFS_COL).get();
-    totalCount = totalSnap.size;
-    totalNew = totalSnap.docs.filter(d => d.data().status === 'new').length;
-  } catch(e) { totalCount = '-'; totalNew = '-'; }
+  // 조회 전: 이번 주 실시간 데이터 기반
+  // 조회 후: 현재 필터된 데이터 기반
+  const list = adminSearched ? getAdminReferrals() : referrals;
+  const from = document.getElementById('adminDateFrom')?.value || '';
+  const to   = document.getElementById('adminDateTo')?.value || '';
+  const periodLabel = adminSearched
+    ? (from||to ? `${from||'처음'} ~ ${to||'오늘'}` : '전체 기간')
+    : '최근 7일';
+
+  const total    = list.length;
+  const newCount = list.filter(r=>r.status==='new').length;
+  const doneCount= list.filter(r=>r.status==='done').length;
 
   document.getElementById('statsGrid').innerHTML=`
-    <div class="stat-card"><div class="stat-label">전체 누적 의뢰</div><div class="stat-value">${totalCount}</div><div class="stat-sub">전체 기간</div></div>
-    <div class="stat-card"><div class="stat-label">신규 대기</div><div class="stat-value" style="color:var(--accent)">${totalNew}</div><div class="stat-sub">전체 미처리</div></div>
-    <div class="stat-card"><div class="stat-label">이번 주 의뢰</div><div class="stat-value" style="color:var(--primary)">${week.length}</div><div class="stat-sub">최근 7일</div></div>
-    <div class="stat-card"><div class="stat-label">이번 주 신규</div><div class="stat-value" style="color:var(--accent)">${week.filter(r=>r.status==='new').length}</div><div class="stat-sub">확인 필요</div></div>
-    <div class="stat-card"><div class="stat-label">이번 주 완료</div><div class="stat-value" style="color:var(--green)">${week.filter(r=>r.status==='done').length}</div><div class="stat-sub">이번 주</div></div>
-    ${facilities.map(f=>`<div class="stat-card"><div class="stat-label">${f}</div><div class="stat-value">${week.filter(r=>r.facility===f).length}</div><div class="stat-sub">대기 ${week.filter(r=>r.facility===f&&r.status==='new').length}건 (7일)</div></div>`).join('')}`;
+    <div class="stat-card">
+      <div class="stat-label">조회 기간 의뢰</div>
+      <div class="stat-value">${total}</div>
+      <div class="stat-sub">${periodLabel}</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">신규 대기</div>
+      <div class="stat-value" style="color:var(--accent)">${newCount}</div>
+      <div class="stat-sub">확인 필요</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">처리 완료</div>
+      <div class="stat-value" style="color:var(--green)">${doneCount}</div>
+      <div class="stat-sub">${periodLabel}</div>
+    </div>
+    ${facilities.map(f=>{
+      const fTotal = list.filter(r=>r.facility===f).length;
+      const fNew   = list.filter(r=>r.facility===f&&r.status==='new').length;
+      return `<div class="stat-card">
+        <div class="stat-label">${f}</div>
+        <div class="stat-value">${fTotal}</div>
+        <div class="stat-sub">대기 ${fNew}건</div>
+      </div>`;
+    }).join('')}`;
 }
 
 // 의뢰 목록 테이블 — 🔍 조회 버튼 클릭 시에만 실행
