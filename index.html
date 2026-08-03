@@ -599,10 +599,10 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
         </select>
       </div>
 
-      <div id="adminEmptyGuide" style="text-align:center;padding:60px 20px;color:var(--text-muted)">
-        <div style="font-size:48px;margin-bottom:16px">🔍</div>
-        <div style="font-size:16px;font-weight:700;color:var(--text-soft);margin-bottom:8px">기간을 선택하고 조회 버튼을 눌러주세요</div>
-        <div style="font-size:13px">오늘 · 이번 주 · 이번 달 · 지난 달 · 직접 입력 후 🔍 조회</div>
+      <div id="adminEmptyGuide" style="text-align:center;padding:48px 20px;color:var(--text-muted);border-top:1px solid var(--border);margin-top:16px">
+        <div style="font-size:40px;margin-bottom:14px">🔍</div>
+        <div style="font-size:15px;font-weight:700;color:var(--text-soft);margin-bottom:8px">기간을 선택하고 조회 버튼을 눌러주세요</div>
+        <div style="font-size:13px">오늘 · 이번 주 · 이번 달 · 지난 달 · 직접 입력 후 <strong>🔍 조회</strong> 클릭</div>
       </div>
 
       <div class="admin-table-wrap" id="adminTableWrap" style="display:none">
@@ -1468,7 +1468,10 @@ function setupListeners() {
     .onSnapshot(snap => {
       referrals = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       renderList();
-      if (currentUser?.isAdmin) renderAdmin();
+      if (currentUser?.isAdmin) {
+        renderAdminStats(); // 현황판 항상 갱신
+        if (adminSearched) renderAdmin(); // 테이블은 조회 상태일 때만
+      }
       updateCounts();
     }, err => { console.error('Refs listener error:', err); });
 
@@ -1914,7 +1917,7 @@ async function saveReferral() {
   try {
     if (editingId) {
       // Merge new attachments with existing ones
-      const existing = referrals.find(r=>r.id===editingId);
+      const existing = allReferrals().find(r=>r.id===editingId);
       data.attachments = [...(existing?.attachments||[]), ...formAttachments];
       data.resultImages = existing?.resultImages || [];
       data.createdAt = existing?.createdAt || now;
@@ -2077,7 +2080,7 @@ function renderList() {
 //  DETAIL VIEW
 // ═══════════════════════════════════════════════
 function showDetail(id) {
-  const r=referrals.find(x=>x.id===id); if(!r) return;
+  const r=allReferrals().find(x=>x.id===id); if(!r) return;
   const v=r.vitals||{};
   const vStr=[v.bp?`혈압:${v.bp}`:'',v.pulse?`맥박:${v.pulse}`:'',v.temp?`체온:${v.temp}℃`:'',
     v.resp?`호흡:${v.resp}`:'',v.spo2?`SpO2:${v.spo2}%`:'',v.glucose?`혈당:${v.glucose}`:'',v.other||'']
@@ -2239,7 +2242,7 @@ function showDetail(id) {
 }
 
 function editReferral(id) {
-  const r=referrals.find(x=>x.id===id); if(!r) return;
+  const r=allReferrals().find(x=>x.id===id); if(!r) return;
   editingId=id; formAttachments=[];
   showTab('form');
   setTimeout(()=>{
@@ -2258,7 +2261,8 @@ function editReferral(id) {
 
 // 로컬 referrals 배열을 즉시 갱신 + 화면 즉시 반영, Firestore 저장은 백그라운드
 function applyLocalUpdate(id, patch) {
-  const r = referrals.find(x=>x.id===id);
+  // referrals(7일) + extReferrals(과거) 모두 업데이트
+  const r = allReferrals().find(x=>x.id===id) || extReferrals.find(x=>x.id===id);
   if (r) Object.assign(r, patch);
   renderList();
   if (currentUser?.isAdmin) renderAdmin();
@@ -2266,7 +2270,7 @@ function applyLocalUpdate(id, patch) {
 }
 
 async function toggleStatus(id) {
-  const r=referrals.find(x=>x.id===id); if(!r) return;
+  const r=allReferrals().find(x=>x.id===id); if(!r) return;
   const newStatus=r.status==='new'?'done':'new';
   const update = { status:newStatus, updatedAt:new Date().toISOString() };
   if (newStatus==='new') update.copay = 0;
@@ -2387,7 +2391,7 @@ function doPaymentComplete(id) {
     .catch(e=>showToast('⚠️ 동기화 지연: '+e.message));
 
   // 수납완료 1건이라도 발생 시 → 가정간호 중단 명단에서 자동 제외
-  const r = referrals.find(x=>x.id===id);
+  const r = allReferrals().find(x=>x.id===id);
   if (r) {
     const key = suspensionKey(r.facility, r.patient, r.birth||'');
     if (suspendedPatients.find(s=>s.id===key)) {
@@ -2414,7 +2418,7 @@ function openEditPaymentDate(id, currentDate) {
 }
 
 function confirmDelete(id) {
-  const r=referrals.find(x=>x.id===id); if(!r) return;
+  const r=allReferrals().find(x=>x.id===id); if(!r) return;
   showModal('의뢰 삭제 확인', `'${r.patient}' 의뢰를 삭제하시겠습니까? 복구할 수 없습니다.`, [
     { label:'취소', cls:'btn-secondary', action:closeModal },
     { label:'삭제', cls:'btn-danger', action:async()=>{ await deleteReferral(id); closeModal(); } }
@@ -2431,9 +2435,35 @@ async function deleteReferral(id) {
 // ═══════════════════════════════════════════════
 //  ADMIN TABLE
 // ═══════════════════════════════════════════════
+// 현황판 카운터 — 항상 표시 (전체 7일 실시간 데이터 기준)
+async function renderAdminStats() {
+  if (!currentUser?.isAdmin) return;
+  const facilities = getAllFacilities();
+  const week = referrals; // 실시간 7일 데이터
+
+  // 전체 누적 건수는 Firestore에서 직접 count (문서 내용 없이 ID만)
+  let totalCount = '...';
+  let totalNew = '...';
+  try {
+    const totalSnap = await db.collection(REFS_COL).get();
+    totalCount = totalSnap.size;
+    totalNew = totalSnap.docs.filter(d => d.data().status === 'new').length;
+  } catch(e) { totalCount = '-'; totalNew = '-'; }
+
+  document.getElementById('statsGrid').innerHTML=`
+    <div class="stat-card"><div class="stat-label">전체 누적 의뢰</div><div class="stat-value">${totalCount}</div><div class="stat-sub">전체 기간</div></div>
+    <div class="stat-card"><div class="stat-label">신규 대기</div><div class="stat-value" style="color:var(--accent)">${totalNew}</div><div class="stat-sub">전체 미처리</div></div>
+    <div class="stat-card"><div class="stat-label">이번 주 의뢰</div><div class="stat-value" style="color:var(--primary)">${week.length}</div><div class="stat-sub">최근 7일</div></div>
+    <div class="stat-card"><div class="stat-label">이번 주 신규</div><div class="stat-value" style="color:var(--accent)">${week.filter(r=>r.status==='new').length}</div><div class="stat-sub">확인 필요</div></div>
+    <div class="stat-card"><div class="stat-label">이번 주 완료</div><div class="stat-value" style="color:var(--green)">${week.filter(r=>r.status==='done').length}</div><div class="stat-sub">이번 주</div></div>
+    ${facilities.map(f=>`<div class="stat-card"><div class="stat-label">${f}</div><div class="stat-value">${week.filter(r=>r.facility===f).length}</div><div class="stat-sub">대기 ${week.filter(r=>r.facility===f&&r.status==='new').length}건 (7일)</div></div>`).join('')}`;
+}
+
+// 의뢰 목록 테이블 — 🔍 조회 버튼 클릭 시에만 실행
 function renderAdmin() {
   if (!currentUser?.isAdmin) return;
-  if (!adminSearched) return; // 조회 버튼을 누르기 전에는 실행 안 함
+  renderAdminStats(); // 현황판은 항상 갱신
+  if (!adminSearched) return; // 조회 전에는 테이블 미표시
   const list=getAdminReferrals();
   document.getElementById('adminTbody').innerHTML=list.map(r=>`
     <tr>
@@ -2448,18 +2478,11 @@ function renderAdmin() {
         <button class="btn-danger btn-xs" onclick="confirmDelete('${r.id}')">삭제</button>
       </td>
     </tr>`).join('')||'<tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted)">데이터가 없습니다.</td></tr>';
-
-  const facilities=getAllFacilities();
-  document.getElementById('statsGrid').innerHTML=`
-    <div class="stat-card"><div class="stat-label">전체 의뢰</div><div class="stat-value">${referrals.length}</div><div class="stat-sub">누적 의뢰 수</div></div>
-    <div class="stat-card"><div class="stat-label">신규 대기</div><div class="stat-value" style="color:var(--accent)">${referrals.filter(r=>r.status==='new').length}</div><div class="stat-sub">확인 필요</div></div>
-    <div class="stat-card"><div class="stat-label">처리 완료</div><div class="stat-value" style="color:var(--green)">${referrals.filter(r=>r.status==='done').length}</div><div class="stat-sub">누적</div></div>
-    ${facilities.map(f=>`<div class="stat-card"><div class="stat-label">${f}</div><div class="stat-value">${referrals.filter(r=>r.facility===f).length}</div><div class="stat-sub">대기 ${referrals.filter(r=>r.facility===f&&r.status==='new').length}건</div></div>`).join('')}`;
 }
 
 function updateCounts() {
   if (!currentUser) return;
-  const mine=currentUser.isAdmin?referrals:referrals.filter(r=>r.facility===currentUser.facility);
+  const mine=currentUser.isAdmin?allReferrals():allReferrals().filter(r=>r.facility===currentUser.facility);
   document.getElementById('listCount').textContent=mine.length;
   if (currentUser.isAdmin) document.getElementById('adminCount').textContent=referrals.length;
 }
@@ -2551,7 +2574,7 @@ function renderAccounts() {
       <div class="acct-body">
         <div class="acct-row"><span class="acct-row-label">아이디</span><span class="acct-row-val">${a.id}</span></div>
         <div class="acct-row"><span class="acct-row-label">비밀번호</span><span class="acct-row-val">${a.pw}</span></div>
-        <div class="acct-row"><span class="acct-row-label">의뢰 수</span><span class="acct-row-val">${referrals.filter(r=>r.facility===a.facility).length}건</span></div>
+        <div class="acct-row"><span class="acct-row-label">의뢰 수</span><span class="acct-row-val">${allReferrals().filter(r=>r.facility===a.facility).length}건</span></div>
       </div>
       <div class="acct-actions">
         <button class="btn-secondary btn-xs" onclick="openEditAccount('${a.id}')">✏️ 수정</button>
@@ -2627,7 +2650,7 @@ async function doEditAccount(oldId) {
 
 function confirmDeleteAccount(id) {
   const a=accounts.find(x=>x.id===id); if(!a) return;
-  const cnt=referrals.filter(r=>r.facility===a.facility).length;
+  const cnt=allReferrals().filter(r=>r.facility===a.facility).length;
   showModal('계정 삭제 확인', `'${a.facility}' 계정을 삭제하시겠습니까?\n연결된 의뢰 ${cnt}건은 유지됩니다.`, [
     { label:'취소', cls:'btn-secondary', action:closeModal },
     { label:'삭제', cls:'btn-danger', action:async()=>{ await db.collection(ACCTS_COL).doc(id).delete(); closeModal(); showToast('🗑 삭제되었습니다.'); } }
@@ -2745,7 +2768,7 @@ const SAFE_DOC_BYTES = 800 * 1024; // 800KB
 // 검사결과 이미지 업로드 (base64 → Firestore 저장)
 function uploadResultImages(event, refId) {
   const files=Array.from(event.target.files); if(!files.length) return;
-  const r=referrals.find(x=>x.id===refId); if(!r) return;
+  const r=allReferrals().find(x=>x.id===refId); if(!r) return;
   const MAX_TOTAL=10;
   const current=r.resultImages||[];
   const remaining=MAX_TOTAL-current.length;
@@ -2803,7 +2826,7 @@ async function finalizeImageUpload(refId, images, progEl) {
 }
 
 function deleteResultImage(refId, imgIdx) {
-  const r=referrals.find(x=>x.id===refId); if(!r||!r.resultImages) return;
+  const r=allReferrals().find(x=>x.id===refId); if(!r||!r.resultImages) return;
   showModal('이미지 삭제','이 검사결과 이미지를 삭제하시겠습니까?',[
     { label:'취소', cls:'btn-secondary', action:closeModal },
     { label:'삭제', cls:'btn-danger', action:async()=>{
@@ -2817,20 +2840,20 @@ function deleteResultImage(refId, imgIdx) {
 
 // Lightbox
 function openLightbox(refId,idx) {
-  const r=referrals.find(x=>x.id===refId); if(!r||!r.resultImages||!r.resultImages[idx]) return;
+  const r=allReferrals().find(x=>x.id===refId); if(!r||!r.resultImages||!r.resultImages[idx]) return;
   lightboxRefId=refId; lightboxCurIdx=idx; updateLightboxDisplay();
   document.getElementById('lightbox').classList.add('open');
   document.addEventListener('keydown',lightboxKeyHandler);
 }
 function updateLightboxDisplay() {
-  const r=referrals.find(x=>x.id===lightboxRefId); if(!r||!r.resultImages) return;
+  const r=allReferrals().find(x=>x.id===lightboxRefId); if(!r||!r.resultImages) return;
   const img=r.resultImages[lightboxCurIdx];
   document.getElementById('lightboxImg').src=img.data;
   document.getElementById('lightboxMeta').textContent=`${img.name||'이미지'} · ${img.uploadedBy||''} ${img.uploadedAt?new Date(img.uploadedAt).toLocaleString('ko-KR'):''}`;
   document.getElementById('lightboxIdx').textContent=`${lightboxCurIdx+1} / ${r.resultImages.length}`;
 }
 function lightboxNav(dir) {
-  const r=referrals.find(x=>x.id===lightboxRefId); if(!r||!r.resultImages) return;
+  const r=allReferrals().find(x=>x.id===lightboxRefId); if(!r||!r.resultImages) return;
   lightboxCurIdx=(lightboxCurIdx+dir+r.resultImages.length)%r.resultImages.length;
   updateLightboxDisplay();
 }
@@ -2936,11 +2959,11 @@ function renderDetailAttachments(attachments, refId) {
   </div>`;
 }
 function downloadAttach(refId,idx) {
-  const r=referrals.find(x=>x.id===refId); if(!r||!r.attachments||!r.attachments[idx]) return;
+  const r=allReferrals().find(x=>x.id===refId); if(!r||!r.attachments||!r.attachments[idx]) return;
   const f=r.attachments[idx], a=document.createElement('a'); a.href=f.data; a.download=f.name; a.click();
 }
 function openAttachLightbox(refId,idx) {
-  const r=referrals.find(x=>x.id===refId); if(!r||!r.attachments) return;
+  const r=allReferrals().find(x=>x.id===refId); if(!r||!r.attachments) return;
   const img=r.attachments[idx]; if(!img||!img.type||!img.type.startsWith('image/')) return;
   document.getElementById('lightboxImg').src=img.data;
   document.getElementById('lightboxMeta').textContent=img.name||'첨부파일';
@@ -2952,7 +2975,7 @@ function openAttachLightbox(refId,idx) {
 //  PRINT
 // ═══════════════════════════════════════════════
 function printReferral(id) {
-  const r=referrals.find(x=>x.id===id); if(!r) return;
+  const r=allReferrals().find(x=>x.id===id); if(!r) return;
   const v=r.vitals||{};
   const html=`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>가정간호 의뢰지 - ${r.patient}</title>
 <style>@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
@@ -3985,7 +4008,7 @@ function getCopayFacility() {
 function populateCopayPatientSelect() {
   const fac = getCopayFacility();
   const query = (document.getElementById('copayPatientSearch')?.value||'').trim();
-  let list = referrals;
+  let list = allReferrals();
   if (fac) list = list.filter(r=>r.facility===fac);
   // 중복 제거 (환자명+생년월일 기준)
   const seen = new Set();
@@ -4057,7 +4080,7 @@ function renderCopayResult() {
   const fac  = getCopayFacility();
 
   // 처리완료 + 본인부담금이 있는 건만 (0원도 포함하여 처리완료 전체 표시)
-  let list = referrals.filter(r=>r.status==='done' && r.copaySet);
+  let list = allReferrals().filter(r=>r.status==='done' && r.copaySet);
   if (from) list = list.filter(r=>r.visitDate>=from);
   if (to)   list = list.filter(r=>r.visitDate<=to);
   if (fac)  list = list.filter(r=>r.facility===fac);
@@ -4538,8 +4561,7 @@ function showTab(tab) {
   if (tab === 'form' && !editingId) resetForm();
   if (tab === 'form') renderRefGrid();
   if (tab === 'admin') {
-    // 전체 관리: 조회 버튼 누르기 전까지 빈 상태 유지
-    // adminSearched는 유지 (탭 이동해도 이전 조회 결과 유지)
+    renderAdminStats(); // 현황판 항상 표시
     document.getElementById('adminEmptyGuide').style.display = adminSearched ? 'none' : '';
     document.getElementById('adminTableWrap').style.display  = adminSearched ? '' : 'none';
     if (adminSearched) renderAdmin();
