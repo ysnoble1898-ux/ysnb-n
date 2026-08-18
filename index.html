@@ -753,7 +753,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
       </div>
 
       <div style="background:#fef2f2;border:1px solid #fecaca;border-radius:var(--radius-sm);padding:14px 18px;margin-bottom:18px;font-size:13px;color:#991b1b;line-height:1.8">
-        💡 <strong>자동 중단 규칙</strong> (2026-06월 수납 현황부터 적용)<br>
+        💡 <strong>자동 중단 규칙</strong> (2026-06월 수납 현황부터 자동 적용 / 수동 예약은 2025-01월부터 소급 적용 가능)<br>
         직전 달 1일~말일 사이에 <strong>처리완료된 의뢰 중 본인부담금이 한 건도 수납완료되지 않은 환자</strong>는 자동으로 <strong>가정간호 중단</strong> 처리됩니다.<br>
         • 중단된 환자는 <strong>의뢰지 작성이 차단</strong>되고, 해당 요양원 로그인 시 <strong>중단 안내 팝업</strong>이 표시됩니다.<br>
         • 관리자가 해당 환자의 본인부담금을 <strong>수납완료(1건이라도)</strong>로 처리하면 → 중단 명단에서 즉시 제외됩니다.<br>
@@ -959,7 +959,7 @@ body{font-family:'Noto Sans KR',sans-serif;background:var(--bg);color:var(--text
               • 중단된 환자는 <strong>의뢰지 작성이 불가</strong>합니다 (저장 시 안내 메시지 표시).<br>
               • 로그인 시 중단 환자 목록이 <strong>팝업으로 자동 안내</strong>되며, 의뢰 목록 화면 상단에도 빨간 안내 배너로 항상 표시됩니다.<br>
               • 본인부담금이 수납완료 처리되면 <strong>자동으로 해제</strong>되어 의뢰지 작성이 다시 가능해집니다. 별도 요청 없이 자동 처리됩니다.<br>
-              • 본 기능은 2026년 06월 수납 현황부터 적용되며, 그 다음 달(2026년 07월) 1일부터 시행됩니다.
+              • 자동 모드는 2026년 06월 수납 현황부터 적용됩니다. 수동 예약은 2025년 01월부터 소급 적용이 가능합니다.
             </div>
           </div>
 
@@ -1359,7 +1359,8 @@ const SUSP_CHECK_DOC  = 'suspensionCheck';
 const SUSP_SCHED_COL  = 'suspensionSchedules';
 const SUSP_FAC_DOC    = 'suspensionFacilities'; // 점검 대상 요양원 설정
 // 본 기능은 6월 수납 현황을 기준으로 7월부터 시행됩니다.
-const SUSPENSION_FEATURE_START_MONTH = '2026-06';
+const SUSPENSION_FEATURE_START_MONTH = '2026-06'; // 자동 모드 기준월
+const SUSPENSION_MANUAL_MIN_MONTH = '2025-01';    // 수동 모드 최소 허용월
 const READS_COL   = 'notice_reads';
 
 // ═══════════════════════════════════════════════
@@ -3454,6 +3455,10 @@ async function runMonthlySuspensionCheck(forceTargetMonth) {
 
 // 실제 점검 실행 (targetMonth: 'YYYY-MM', force: 이미 처리된 달도 재실행 여부)
 async function doSuspensionCheck(targetMonth, force) {
+  // 수동/강제 실행(force=true) 시에는 기준월 제한 없음
+  // 자동 실행 시에만 시행 기준월 체크
+  if (!force && targetMonth < SUSPENSION_FEATURE_START_MONTH) return;
+
   const cfgDoc = await db.collection(CFG_COL).doc(SUSP_CHECK_DOC).get();
   const processedMonth = cfgDoc.exists ? cfgDoc.data().processedMonth : null;
   if (!force && processedMonth === targetMonth) return; // 이미 처리됨
@@ -3527,10 +3532,6 @@ async function doSuspensionCheck(targetMonth, force) {
 // 즉시 강제 실행 (관리자 버튼)
 async function forceRunSuspensionCheck() {
   const prevMonth = getPrevMonthStr();
-  if (prevMonth < SUSPENSION_FEATURE_START_MONTH) {
-    showToast(`⚠️ 시행 기준월(${SUSPENSION_FEATURE_START_MONTH}) 이전이라 아직 실행할 수 없습니다.`);
-    return;
-  }
   showModal('즉시 점검 실행',
     `<strong>${prevMonth}</strong> 수납 현황을 기준으로 미수 점검을 지금 즉시 실행합니다.<br>이미 처리된 경우에도 재실행됩니다. 계속하시겠습니까?`,
     [
@@ -3608,8 +3609,8 @@ async function saveScheduledCheck() {
 
   if (!targetMonth) { showToast('⚠️ 점검 대상 월을 선택해 주세요.'); return; }
   if (!runDate)      { showToast('⚠️ 실행 예약 날짜를 선택해 주세요.'); return; }
-  if (targetMonth < SUSPENSION_FEATURE_START_MONTH) {
-    showToast(`⚠️ ${targetMonth}은 시행 기준월(${SUSPENSION_FEATURE_START_MONTH}) 이전이라 등록할 수 없습니다.`); return;
+  if (targetMonth < SUSPENSION_MANUAL_MIN_MONTH) {
+    showToast(`⚠️ ${targetMonth}은 ${SUSPENSION_MANUAL_MIN_MONTH} 이전이라 등록할 수 없습니다.`); return;
   }
 
   try {
