@@ -3426,13 +3426,26 @@ async function runMonthlySuspensionCheck(forceTargetMonth) {
         const pending = schedules.filter(s => s.runDate <= today && !s.executed);
         if (pending.length) {
           pending.sort((a,b)=>a.runDate.localeCompare(b.runDate));
+          let doneCount = 0, failCount = 0;
           for (const sched of pending) {
-            await doSuspensionCheck(sched.targetMonth, true);
-            await db.collection(SUSP_SCHED_COL).doc(sched.id).update({
-              executed: true, executedAt: new Date().toISOString()
-            }).catch(()=>{});
+            try {
+              await doSuspensionCheck(sched.targetMonth, true);
+              await db.collection(SUSP_SCHED_COL).doc(sched.id).update({
+                executed: true, executedAt: new Date().toISOString()
+              });
+              doneCount++;
+            } catch(itemErr) {
+              failCount++;
+              console.error(`점검 실패 (${sched.targetMonth}):`, itemErr.message);
+              // 실패해도 executed 처리 — 무한 재시도 방지
+              await db.collection(SUSP_SCHED_COL).doc(sched.id).update({
+                executed: true, executedAt: new Date().toISOString(),
+                error: itemErr.message
+              }).catch(()=>{});
+            }
           }
-          return; // 예약 점검 완료 후 종료
+          if (doneCount > 0) showToast(`✅ 미수 점검 ${doneCount}건 완료${failCount>0?` (오류 ${failCount}건)`:''}`, 4000);
+          return;
         }
       } catch(schedErr) {
         // 예약 조회 실패 → 무시하고 자동 점검으로 진행
@@ -3469,13 +3482,13 @@ async function doSuspensionCheck(targetMonth, force) {
   await loadSuspensionFacilities();
   const targetFacs = suspTargetFacilities; // null=전체, Set=지정
 
-  // 해당 월 처리완료 의뢰 직접 Firestore 조회 (메모리에 없는 과거 데이터 포함)
+  // Firestore 쿼리: visitDate 범위만 (status 복합 인덱스 불필요)
   const snap = await db.collection(REFS_COL)
     .where('visitDate', '>=', firstDay)
     .where('visitDate', '<=', lastDay)
-    .where('status', '==', 'done')
     .get();
-  const allMonthRefs = snap.docs.map(d=>({id:d.id,...d.data()}));
+  // status 필터는 JavaScript에서 처리 (Firestore 복합 인덱스 없이도 작동)
+  const allMonthRefs = snap.docs.map(d=>({id:d.id,...d.data()})).filter(r=>r.status==='done');
   const monthRefs = allMonthRefs.filter(r =>
     targetFacs===null || targetFacs.has(r.facility)
   );
