@@ -4015,7 +4015,7 @@ function confirmDeleteNotice(id) {
 let copayMode = 'patient'; // 'patient' | 'facility'
 let copayLastResult = null; // 마지막 조회 결과 캐시 (인쇄/엑셀용)
 
-function initCopayTab() {
+async function initCopayTab() {
   // 모드 버튼 초기 상태
   setCopayMode(copayMode, true);
 
@@ -4030,16 +4030,34 @@ function initCopayTab() {
     facField.style.display = 'none';
   }
 
-  populateCopayPatientSelect();
-
-  // 기본 기간: 이번 달
+  // 기본 기간: 전체
   if (!document.getElementById('copayDateFrom').value) {
     setCopayQuick('all');
   }
 
   document.getElementById('copayResult').innerHTML = `
-    <div class="empty-state"><div class="ei">🔍</div><h3>조회 조건을 선택하고 '조회' 버튼을 눌러주세요</h3></div>`;
+    <div class="empty-state"><div class="ei">🔄</div><h3>전체 환자 목록을 불러오는 중...</h3></div>`;
   document.getElementById('copayExportBar').style.display = 'none';
+
+  // 검색창·선택박스 비활성화 (로딩 중 검색 방지)
+  const searchEl = document.getElementById('copayPatientSearch');
+  const selEl    = document.getElementById('copayPatientSelect');
+  if (searchEl) { searchEl.disabled = true; searchEl.placeholder = '🔄 데이터 불러오는 중...'; }
+  if (selEl)    selEl.innerHTML = '<option value="">불러오는 중...</option>';
+
+  // 전체 데이터 로드 (본인부담금 탭은 전 환자 목록 필요)
+  if (!allLoaded) {
+    showLoadingBanner(true, '🔄 전체 환자 목록을 불러오는 중...');
+    await loadAllIfNeeded();
+    showLoadingBanner(false);
+  }
+
+  // 로딩 완료 → 검색창 활성화 + 기존 검색어로 자동 재검색
+  if (searchEl) { searchEl.disabled = false; searchEl.placeholder = '🔍 환자명 검색'; }
+  populateCopayPatientSelect(); // 기존 입력값(예: '백순자')이 있으면 자동 적용
+
+  document.getElementById('copayResult').innerHTML = `
+    <div class="empty-state"><div class="ei">🔍</div><h3>조회 조건을 선택하고 '조회' 버튼을 눌러주세요</h3></div>`;
 }
 
 function setCopayMode(mode, silent) {
