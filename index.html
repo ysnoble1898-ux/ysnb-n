@@ -1554,7 +1554,7 @@ function teardownListeners() {
 }
 
 function loadAccounts() { return accounts; }
-function getAllFacilities() { return accounts.map(a => a.facility); }
+function getAllFacilities() { return [...new Set(accounts.map(a => a.facility))]; }
 
 // ── 전체 의뢰 = 실시간(7일) + 추가 로드(과거) 합산, 중복 제거 ──
 function allReferrals() {
