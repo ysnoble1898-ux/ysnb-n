@@ -2110,7 +2110,7 @@ function showDetail(id) {
   const vStr=[v.bp?`혈압:${v.bp}`:'',v.pulse?`맥박:${v.pulse}`:'',v.temp?`체온:${v.temp}℃`:'',
     v.resp?`호흡:${v.resp}`:'',v.spo2?`SpO2:${v.spo2}%`:'',v.glucose?`혈당:${v.glucose}`:'',v.other||'']
     .filter(Boolean).join(' | ');
-  const canEdit=currentUser.isAdmin||currentUser.facility===r.facility;
+  const canEdit=currentUser.isAdmin||currentUser.facility===r.facility; // 수정은 요양원도 가능, 삭제만 관리자 전용
   const imgs=r.resultImages||[], hasImages=imgs.length>0;
   const copay = r.copay || 0;
   const copayFmt = copay > 0 ? copay.toLocaleString('ko-KR') + '원' : '미입력';
@@ -2255,6 +2255,10 @@ function showDetail(id) {
     </div>
     <div class="detail-actions" style="flex-direction:column;align-items:stretch">
       ${r.status==='new' && currentUser.isAdmin ? statusBtn : ''}
+      ${!currentUser.isAdmin ? `<div style="background:#fff8e1;border:1px solid #f0c040;border-radius:8px;padding:10px 14px;font-size:12px;color:#7a5c00;line-height:1.6;margin-bottom:8px">
+        ⚠️ <strong>의뢰 취소가 필요하신 경우</strong> 임의로 삭제하지 마시고, 반드시 <strong>병원 원무과</strong>에 취소·변경 사유를 알려주시기 바랍니다.<br>
+        무단 삭제 시 가정간호 서비스가 그대로 진행되어 본인부담금이 청구될 수 있습니다.
+      </div>` : ''}
       <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
         <button class="btn-secondary" onclick="printReferral('${r.id}')">🖨 인쇄</button>
         ${canEdit?`<button class="btn-secondary" onclick="editReferral('${r.id}')">✏️ 수정</button>`:''}
@@ -2444,6 +2448,12 @@ function openEditPaymentDate(id, currentDate) {
 
 function confirmDelete(id) {
   const r=allReferrals().find(x=>x.id===id); if(!r) return;
+  if(!currentUser.isAdmin){
+    showModal('삭제 불가 — 원무과 연락 필요',
+      '⚠️ 의뢰 삭제는 병원 원무과에서만 처리할 수 있습니다.\n\n취소 또는 변경이 필요하신 경우, 병원 원무과에 취소·변경 사실과 사유를 반드시 알려주시기 바랍니다.\n\n※ 무단 삭제 시 가정간호 서비스가 그대로 진행되어 본인부담금이 청구될 수 있습니다.',
+      [{ label:'확인', cls:'btn-primary', action:closeModal }]);
+    return;
+  }
   showModal('의뢰 삭제 확인', `'${r.patient}' 의뢰를 삭제하시겠습니까? 복구할 수 없습니다.`, [
     { label:'취소', cls:'btn-secondary', action:closeModal },
     { label:'삭제', cls:'btn-danger', action:async()=>{ await deleteReferral(id); closeModal(); } }
